@@ -9,7 +9,6 @@ export default defineConfig({
   resolve: {
     alias: {
       '@core': path.resolve(__dirname, 'core'),
-      '@utils': path.resolve(__dirname, 'utils'),
     },
   },
   build: {

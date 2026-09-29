@@ -1,7 +1,23 @@
+# Dependencies and generated builds
 node_modules/
 dist/
 dist-electron/
-*.db
-*.sqlite
-.env
 release/
+*.tsbuildinfo
+
+# Local credentials, databases, and logs
+.env
+.env.*
+!.env.example
+*.db
+*.db-*
+*.sqlite
+*.sqlite-*
+*.sqlite3
+*.log
+
+# Personal tooling and screenshot profiles
+.claude/
+.screenshots-cache/
+.DS_Store
+Thumbs.db

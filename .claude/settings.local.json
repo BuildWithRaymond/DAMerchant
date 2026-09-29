@@ -1,9 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(npx tsx:*)",
-      "WebFetch(domain:docs.chaos-server.net)",
-      "Bash(gh api:*)"
-    ]
-  }
-}

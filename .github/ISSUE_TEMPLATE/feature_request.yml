@@ -1,0 +1,17 @@
+name: Feature request
+description: Suggest an improvement to the merchant workflow.
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve?
+      description: Describe your current workflow and where it falls short.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed change
+      description: Describe the behavior you want and any alternatives you considered.
+    validations:
+      required: true

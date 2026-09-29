@@ -11,5 +11,5 @@
     "resolveJsonModule": true,
     "declaration": false
   },
-  "include": ["electron", "core", "utils"]
+  "include": ["electron", "core"]
 }

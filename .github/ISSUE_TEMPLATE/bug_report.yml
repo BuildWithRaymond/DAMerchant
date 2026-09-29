@@ -1,0 +1,29 @@
+name: Bug report
+description: Report a reproducible problem with Merchant Mode.
+body:
+  - type: input
+    id: version
+    attributes:
+      label: Merchant Mode version
+      placeholder: "1.1.6"
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Windows version and client setup
+      description: Include whether you launched the client from Merchant Mode or connected through another proxy.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Describe the steps, expected behavior, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Screenshots or relevant logs
+      description: Remove account details, tokens, passwords, and private messages before attaching anything.

@@ -15,10 +15,9 @@
     "outDir": "dist",
     "baseUrl": ".",
     "paths": {
-      "@core/*": ["core/*"],
-      "@utils/*": ["utils/*"]
+      "@core/*": ["core/*"]
     }
   },
-  "include": ["src", "core", "utils", "electron"],
+  "include": ["src", "core", "electron"],
   "exclude": ["node_modules", "dist"]
 }
