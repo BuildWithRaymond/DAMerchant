@@ -8,16 +8,16 @@
 Automated Dark Ages trading, connected to AislingExchange.</p>
 
 <p align="center">
-  <a href="https://github.com/BuildWithRaymond/merchantmode/releases/latest"><img src="https://img.shields.io/github/v/release/BuildWithRaymond/merchantmode?color=c9a84c&amp;label=release" alt="Latest release" /></a>
+  <a href="https://github.com/BuildWithRaymond/DAMerchant/releases/latest"><img src="https://img.shields.io/github/v/release/BuildWithRaymond/DAMerchant?color=c9a84c&amp;label=release" alt="Latest release" /></a>
   <img src="https://img.shields.io/badge/platform-Windows-47848f" alt="Windows" />
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-ISC-c9a84c" alt="ISC license" /></a>
 </p>
 
 <p align="center">
-  <a href="https://github.com/BuildWithRaymond/merchantmode/releases/latest">Download for Windows</a> &middot;
+  <a href="https://github.com/BuildWithRaymond/DAMerchant/releases/latest">Download for Windows</a> &middot;
   <a href="#getting-started">Get started</a> &middot;
   <a href="CONTRIBUTING.md">Contribute</a> &middot;
-  <a href="https://github.com/BuildWithRaymond/merchantmode/issues">Report an issue</a>
+  <a href="https://github.com/BuildWithRaymond/DAMerchant/issues">Report an issue</a>
 </p>
 
 ![Merchant Mode: Set up shop. Step away. Actual listings screen with sample data.](docs/images/cover.png)
@@ -50,7 +50,7 @@ Actual app screens with fictional sample data. [Capture them locally](docs/scree
 
 ## Getting started
 
-1. Download the Windows installer from [GitHub Releases](https://github.com/BuildWithRaymond/merchantmode/releases/latest) and install Merchant Mode.
+1. Download the Windows installer from [GitHub Releases](https://github.com/BuildWithRaymond/DAMerchant/releases/latest) and install Merchant Mode.
 2. Open **Settings** and select your `Darkages.exe` if it is not in the default installation folder.
 3. Click **Launch Client**, then sign in to your game character. A character tab appears once connected.
 4. Open **Listings** to add a sell, buy or trade listing, or click an inventory item on the Dashboard.
@@ -71,7 +71,7 @@ Settings, listings, transaction history and AE authentication are stored in `mer
 **Requirements:** Windows, Node.js 22+, and npm. Live trading also needs a Dark Ages installation. Compilation and screenshot captures work without a game account.
 
 ```sh
-git clone https://github.com/BuildWithRaymond/merchantmode.git
+git clone https://github.com/BuildWithRaymond/DAMerchant.git merchantmode
 cd merchantmode
 npm ci
 npm run electron:dev

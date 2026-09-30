@@ -17,7 +17,7 @@
 - Added an offline screenshot capture workflow with fictional sample data.
 - Updated the build to compile both Electron and the renderer; local installer builds explicitly disable publishing.
 - Synchronized the lockfile version with the existing 1.1.6 package version.
-- Updated repository links and the release target to the current BuildWithRaymond organization/account.
+- Updated repository links and the release target to `BuildWithRaymond/DAMerchant`.
 
 ## v1.1.5
 

@@ -7,7 +7,7 @@ Merchant Mode is a Windows Electron application. Small, focused pull requests ar
 Use Windows, Node.js 22 or newer, and npm. A Dark Ages installation is needed for live trading checks, but not for compilation or documentation screenshots.
 
 ```sh
-git clone https://github.com/BuildWithRaymond/merchantmode.git
+git clone https://github.com/BuildWithRaymond/DAMerchant.git merchantmode
 cd merchantmode
 npm ci
 npm run electron:dev

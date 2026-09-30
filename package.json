@@ -44,12 +44,12 @@
     "publish": {
       "provider": "github",
       "owner": "BuildWithRaymond",
-      "repo": "merchantmode"
+      "repo": "DAMerchant"
     }
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/BuildWithRaymond/merchantmode.git"
+    "url": "git+https://github.com/BuildWithRaymond/DAMerchant.git"
   },
   "keywords": [
     "dark-ages",
@@ -64,9 +64,9 @@
   },
   "license": "ISC",
   "bugs": {
-    "url": "https://github.com/BuildWithRaymond/merchantmode/issues"
+    "url": "https://github.com/BuildWithRaymond/DAMerchant/issues"
   },
-  "homepage": "https://github.com/BuildWithRaymond/merchantmode#readme",
+  "homepage": "https://github.com/BuildWithRaymond/DAMerchant#readme",
   "devDependencies": {
     "@tailwindcss/vite": "^4.2.1",
     "@types/better-sqlite3": "^7.6.13",
