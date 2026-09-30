@@ -1,6 +1,6 @@
 {
   "name": "merchantmode",
-  "version": "1.1.7",
+  "version": "1.1.8",
   "description": "Windows desktop companion for automated Dark Ages trading and AislingExchange listings",
   "main": "dist-electron/electron/main.js",
   "scripts": {

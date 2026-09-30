@@ -22,6 +22,8 @@ The NSIS installer is written to `release/`. This command explicitly disables pu
 6. Run `npm run dist` to build and upload the release artifacts.
 7. Review the release on GitHub and publish it if it is a draft. Keep the installer, blockmap and `latest.yml` together so Electron's updater can resolve the release.
 
+Use only the version number (for example, `1.1.8`) as the GitHub release title.
+
 For a manual asset upload, name the installer and blockmap exactly as `latest.yml` expects. A local NSIS build may write filenames with spaces while the updater metadata uses hyphens.
 
 ## App updates

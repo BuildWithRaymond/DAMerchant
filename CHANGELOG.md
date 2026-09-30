@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.1.8
+
+### Bug Fixes
+- Fixed client launch for the newer Dark Ages 7.41 executable layout that reported `0xC4` at `0x57A7D0`.
+- Verified both server host paths, the fallback address, and each port branch before patching. The newer layout already bypasses the single-instance check; its changed intro code is left intact.
+- Kept the previous 7.41 patch profile for existing installations and added simulated memory tests for both layouts and unsupported clients.
+
 ## v1.1.7
 
 ### Bug Fixes

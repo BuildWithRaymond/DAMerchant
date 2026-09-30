@@ -56,6 +56,8 @@ Actual app screens with fictional sample data. [Capture them locally](docs/scree
 4. Open **Listings** to add a sell, buy or trade listing, or click an inventory item on the Dashboard.
 5. Keep the client connected. Use the Dashboard, Whispers and History screens to follow trading activity.
 
+The built-in launcher supports the verified Dark Ages 7.41 client layouts, including the newer layout that previously produced a version mismatch at `0x57a7d0`. Select the installed `Darkages.exe` in Settings if needed. The newer layout shows the normal intro sequence.
+
 To sync marketplace listings, sign in to AislingExchange in **Settings**. Use each listing's sync option to control what is published. The **All Merchants** tab shows the live merchant network.
 
 ### Existing bot or proxy setup

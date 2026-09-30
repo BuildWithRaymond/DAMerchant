@@ -1,6 +1,7 @@
 // @ts-nocheck -- koffi FFI types don't have complete TS definitions
 import koffi from 'koffi';
 import path from 'path';
+import { buildClientWrites, prepareClientPatches } from './client-patches';
 
 // ─── Win32 Type Definitions ───
 
@@ -119,21 +120,7 @@ const VirtualAllocEx = kernel32.func('VirtualAllocEx', 'uintptr', [
   'uint32',   // flProtect
 ]);
 
-// ─── DA Client Patch Addresses (v7.41) ───
-
-const DA_CLIENT_VERSION = '7.41';
-
-const MULTIPLE_INSTANCE_PATCH_ADDR = 0x57A7CE;
-const MULTIPLE_INSTANCE_ORIGINAL = [0xFF, 0x15, 0xBC, 0x21, 0x6A, 0x00];
-
-const SKIP_INTRO_PATCH_ADDR = 0x42E61F;
-const SKIP_INTRO_ORIGINAL = [0x83, 0xFA, 0x01, 0x0F, 0x85, 0x9B];
-
-const SERVER_HOSTNAME_PATCH_ADDRS = [0x433392, 0x565628];
-const SERVER_FALLBACK_IP_PATCH_ADDR = 0x4333C3;
-const SERVER_PORT_PATCH_ADDR = 0x4333E3;
-const SERVER_PORT_ORIGINAL = [0xBA, 0x97, 0x02, 0x00, 0x00]; // MOV EDX, 663
-const SERVER_FALLBACK_IP_ORIGINAL = [0x6A, 0x44, 0x6A, 0xD8, 0x6A, 0x5A, 0x6A, 0xCE]; // PUSH 68.216.90.206
+// ─── Character data (DA client v7.41) ───
 
 const CHARACTER_NAME_ADDR = 0x73D910;
 const CHARACTER_NAME_LENGTH = 12;
@@ -144,7 +131,7 @@ function writeBytes(hProcess: any, address: number, bytes: number[]): void {
   const buf = Buffer.from(bytes);
   const bytesWritten = [0];
   const result = WriteProcessMemory(hProcess, address, buf, buf.length, bytesWritten);
-  if (!result) {
+  if (!result || bytesWritten[0] !== buf.length) {
     throw new Error(`WriteProcessMemory failed at 0x${address.toString(16)}`);
   }
 }
@@ -153,23 +140,10 @@ function readBytes(hProcess: any, address: number, length: number): Buffer {
   const buf = Buffer.alloc(length);
   const bytesRead = [0];
   const result = ReadProcessMemory(hProcess, address, buf, length, bytesRead);
-  if (!result) {
+  if (!result || bytesRead[0] !== length) {
     throw new Error(`ReadProcessMemory failed at 0x${address.toString(16)}`);
   }
   return buf;
-}
-
-function verifyBytes(hProcess: any, address: number, expected: number[]): void {
-  const actual = readBytes(hProcess, address, expected.length);
-  for (let i = 0; i < expected.length; i++) {
-    if (actual[i] !== expected[i]) {
-      const addr = (address + i).toString(16);
-      throw new Error(
-        `Game version mismatch at 0x${addr}: expected 0x${expected[i].toString(16)}, ` +
-        `got 0x${actual[i].toString(16)}. Patches require DA client v${DA_CLIENT_VERSION}.`
-      );
-    }
-  }
 }
 
 function allocAndWriteString(hProcess: any, str: string): number {
@@ -181,65 +155,11 @@ function allocAndWriteString(hProcess: any, str: string): number {
 
   const bytesWritten = [0];
   const result = WriteProcessMemory(hProcess, remoteMem, strBuf, strBuf.length, bytesWritten);
-  if (!result) {
+  if (!result || bytesWritten[0] !== strBuf.length) {
     throw new Error('WriteProcessMemory failed for string allocation');
   }
 
   return remoteMem;
-}
-
-function writeUint32LE(hProcess: any, address: number, value: number): void {
-  const buf = Buffer.alloc(4);
-  buf.writeUInt32LE(value, 0);
-  const bytesWritten = [0];
-  WriteProcessMemory(hProcess, address, buf, 4, bytesWritten);
-}
-
-// ─── Patch Functions (matching Arbiter exactly) ───
-
-function applyMultipleInstancePatch(hProcess: any): void {
-  verifyBytes(hProcess, MULTIPLE_INSTANCE_PATCH_ADDR, MULTIPLE_INSTANCE_ORIGINAL);
-  writeBytes(hProcess, MULTIPLE_INSTANCE_PATCH_ADDR, [
-    0x31, 0xC0, // XOR EAX, EAX
-    0x90, 0x90, 0x90, 0x90, // NOP x4
-  ]);
-  console.log('[Launcher] Applied multiple instance patch');
-}
-
-function applySkipIntroPatch(hProcess: any): void {
-  verifyBytes(hProcess, SKIP_INTRO_PATCH_ADDR, SKIP_INTRO_ORIGINAL);
-  writeBytes(hProcess, SKIP_INTRO_PATCH_ADDR, [
-    0x83, 0xFA, 0x00, // CMP EDX, 0
-    0x90, 0x90, 0x90, // NOP x3
-  ]);
-  console.log('[Launcher] Applied skip intro patch');
-}
-
-function applyServerEndpointPatch(hProcess: any, hostnamePtr: number, port: number): void {
-  verifyBytes(hProcess, SERVER_PORT_PATCH_ADDR, SERVER_PORT_ORIGINAL);
-  verifyBytes(hProcess, SERVER_FALLBACK_IP_PATCH_ADDR, SERVER_FALLBACK_IP_ORIGINAL);
-
-  for (const addr of SERVER_HOSTNAME_PATCH_ADDRS) {
-    writeUint32LE(hProcess, addr, hostnamePtr);
-  }
-
-  writeBytes(hProcess, SERVER_PORT_PATCH_ADDR, [
-    0xBA, // MOV EDX, imm32
-    port & 0xFF,
-    (port >> 8) & 0xFF,
-    0x00,
-    0x00,
-  ]);
-
-  // Patch fallback IP to 127.0.0.1 (reversed for RTL PUSH convention)
-  writeBytes(hProcess, SERVER_FALLBACK_IP_PATCH_ADDR, [
-    0x6A, 1,   // PUSH 1
-    0x6A, 0,   // PUSH 0
-    0x6A, 0,   // PUSH 0
-    0x6A, 127, // PUSH 127
-  ]);
-
-  console.log(`[Launcher] Applied server endpoint patch -> localhost:${port}`);
 }
 
 // ─── Public API ───
@@ -283,25 +203,30 @@ export function launchClient(clientExePath: string, options: LaunchOptions = {})
 
   const hProcess = OpenProcess(PROCESS_ALL_ACCESS, 0, pi.dwProcessId);
   if (!hProcess) {
+    TerminateProcess(pi.hProcess, 1);
+    CloseHandle(pi.hProcess);
+    CloseHandle(pi.hThread);
     throw new Error('OpenProcess failed');
   }
 
   try {
-    applyMultipleInstancePatch(hProcess);
-    if (skipIntro) applySkipIntroPatch(hProcess);
-
+    const profile = prepareClientPatches((address, length) => readBytes(hProcess, address, length), skipIntro);
     const hostnamePtr = allocAndWriteString(hProcess, 'localhost');
-    applyServerEndpointPatch(hProcess, hostnamePtr, port);
+    for (const patch of buildClientWrites(profile, hostnamePtr, port, skipIntro)) {
+      writeBytes(hProcess, patch.address, patch.bytes);
+    }
 
-    console.log('[Launcher] All patches applied, resuming thread');
+    console.log(`[Launcher] Applied ${profile} endpoint patch -> localhost:${port}; resuming thread`);
   } catch (err) {
     TerminateProcess(hProcess, 1);
     CloseHandle(hProcess);
+    CloseHandle(pi.hProcess);
     CloseHandle(pi.hThread);
     throw err;
   }
 
   ResumeThread(pi.hThread);
+  CloseHandle(pi.hProcess);
 
   return {
     processId: pi.dwProcessId,
