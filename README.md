@@ -24,6 +24,10 @@ Automated Dark Ages trading, connected to AislingExchange.</p>
 
 > **Merchant Mode is now DAMerchant.** Same great trading system, new name. Recent updates make SELL exchanges safer, cancel unrelated offers promptly, keep completed sales in History and listing counts, add automatic group titles, improve character portraits, and support the current Dark Ages 7.41 client. Existing settings and trade data stay in place.
 
+<p align="center">
+  <img src="docs/images/damerchant-v1.1.9-discord-announcement.png" width="720" alt="DAMerchant launch artwork showing a fantasy merchant with gold and trade items" />
+</p>
+
 DAMerchant is a Windows desktop app for running a shop in **Dark Ages**. Create sell, buy or trade listings, respond to buyer whispers, and complete exchanges automatically. Manage multiple characters from one window and connect your listings to [AislingExchange](https://aislingexchange.com).
 
 ## Built for the merchant workflow
