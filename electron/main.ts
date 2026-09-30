@@ -3,7 +3,7 @@ import { autoUpdater } from 'electron-updater';
 import path from 'path';
 import { ProxyServer } from '../core/proxy/proxy-server';
 import { ProxyConnection } from '../core/proxy/proxy-connection';
-import { MerchantEngine } from '../core/engine/merchant-engine';
+import { MerchantEngine, type SellReservation } from '../core/engine/merchant-engine';
 import { InventoryTracker } from '../core/engine/inventory-tracker';
 import { LocationTracker } from '../core/engine/location-tracker';
 import { MerchantHubClient } from '../core/network/merchant-hub-client';
@@ -255,34 +255,13 @@ function createCharacterContext(characterName: string, connection: ProxyConnecti
     injectExchangeAction(characterName, ExchangeClientAction.Accept, targetId);
   });
 
-  engine.on('requestFillSell', (listing: MerchantListing, targetId: number, requestedQty: number) => {
-    // Find the item in inventory and add it to exchange
-    const slot = inventoryTracker.findSlotByName(listing.itemName);
-    console.log(`[MerchantMode:${characterName}] FillSell: looking for "${listing.itemName}", found slot=${slot}, requestedQty=${requestedQty}`);
-    if (slot !== undefined) {
-      const item = inventoryTracker.getItem(slot);
-      if (item?.isStackable) {
-        // Stackable items use a two-step process:
-        // 1. Send AddItem to trigger QuantityPrompt from server
-        // 2. Wait for quantityPrompt event, then send AddStackableItem with qty
-        const qty = Math.min(requestedQty, item.quantity);
-        console.log(`[MerchantMode:${characterName}] Adding stackable item slot=${slot}, sending AddItem first to trigger qty prompt (qty=${qty})`);
-        engine.once('quantityPrompt', (promptSlot: number, promptTargetId: number) => {
-          console.log(`[MerchantMode:${characterName}] QuantityPrompt received for slot=${promptSlot}, responding with qty=${qty}`);
-          injectExchangeAddStackable(characterName, promptTargetId, promptSlot, qty);
-          setTimeout(() => engine.onFillComplete(), 500);
-        });
-        injectExchangeAddItem(characterName, targetId, slot);
-      } else {
-        console.log(`[MerchantMode:${characterName}] Adding item slot=${slot} name="${item?.name}" to exchange`);
-        injectExchangeAddItem(characterName, targetId, slot);
-        setTimeout(() => engine.onFillComplete(), 500);
-      }
-    } else {
-      // Item not found in inventory
-      injectExchangeAction(characterName, ExchangeClientAction.Cancel, targetId);
-      send('engine:validation-failed', { characterName, reason: `Item "${listing.itemName}" not found in inventory` });
-    }
+  engine.on('requestFillSell', (reservation: SellReservation, targetId: number) => {
+    console.log(`[MerchantMode:${characterName}] FillSell: reserved ${reservation.quantity}x "${reservation.listing.itemName}" in ${reservation.slots.length} slot(s)`);
+    for (const item of reservation.slots) injectExchangeAddItem(characterName, targetId, item.slot);
+  });
+
+  engine.on('requestFillSellStack', (targetId: number, slot: number, quantity: number) => {
+    injectExchangeAddStackable(characterName, targetId, slot, quantity);
   });
 
   engine.on('requestFillBuy', (listing: MerchantListing, targetId: number, requestedQty: number) => {

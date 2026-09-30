@@ -36,6 +36,18 @@ interface ExchangeState {
   theyAccepted: boolean;
   weAccepted: boolean;
   pendingQuantitySlot?: number;
+  sell?: SellReservation;
+}
+
+export interface SellReservation {
+  listing: MerchantListing;
+  quantity: number;
+  price: number;
+  slots: { slot: number; quantity: number; initialQuantity: number; sprite: number; stackable: boolean }[];
+  echoesRemaining: number;
+  baselineGold: number;
+  serverCompleted: boolean;
+  acceptSent: boolean;
 }
 
 export class MerchantEngine extends EventEmitter {
@@ -55,6 +67,9 @@ export class MerchantEngine extends EventEmitter {
     super();
     this.inventoryTracker = inventoryTracker;
     this.entityTracker = new EntityTracker();
+    this.inventoryTracker.on('itemAdded', () => this.finalizeSaleIfReady());
+    this.inventoryTracker.on('itemRemoved', () => this.finalizeSaleIfReady());
+    this.inventoryTracker.on('goldUpdated', () => this.finalizeSaleIfReady());
   }
 
   getState(): MerchantState {
@@ -352,6 +367,8 @@ export class MerchantEngine extends EventEmitter {
       this.emit('requestCancel', targetId);
       this.resetState();
     }, 60000);
+    // A pending exchange must not keep CLI tests or shutdown alive.
+    this.exchangeTimeout.unref?.();
   }
 
   private onQuantityPrompt(promptSlot: number): void {
@@ -361,10 +378,17 @@ export class MerchantEngine extends EventEmitter {
 
     // Server is asking how many of a stackable item to add.
     // Store the slot so the fill handler knows to respond with AddStackableItem.
+    const sell = this.currentExchange.sell;
+    const expected = sell?.slots.find((slot) => slot.stackable && slot.slot === promptSlot);
+    if (sell && !expected) {
+      this.cancelUnsafeOffer('Unexpected stack quantity prompt');
+      return;
+    }
     this.currentExchange.pendingQuantitySlot = promptSlot;
 
     // Emit event so the fill logic can respond with the quantity
     this.emit('quantityPrompt', promptSlot, this.currentExchange.targetId);
+    if (expected) this.emit('requestFillSellStack', this.currentExchange.targetId, promptSlot, expected.quantity);
   }
 
   private onExchangeItemAdded(party: number, index: number, sprite: number, name: string): void {
@@ -375,12 +399,29 @@ export class MerchantEngine extends EventEmitter {
 
     if (party === ExchangeParty.Them) {
       this.currentExchange.theirItems.push(item);
+      if (this.currentExchange.sell) {
+        this.cancelUnsafeOffer('Buyer changed the approved gold-only offer');
+        return;
+      }
       // They added an item — check if we should fill our side (BUY listing)
       this.tryAutoFill();
     } else {
       this.currentExchange.ourItems.push(item);
       // Adding an item on our side resets their accept in the game server
       this.currentExchange.theyAccepted = false;
+      const sell = this.currentExchange.sell;
+      if (sell) {
+        const expected = sell.slots[sell.slots.length - sell.echoesRemaining];
+        if (!expected || name.toLowerCase() !== sell.listing.itemName.toLowerCase() || sprite !== expected.sprite) {
+          this.cancelUnsafeOffer('Server echoed an unexpected sale item');
+          return;
+        }
+        sell.echoesRemaining--;
+        if (sell.echoesRemaining === 0) {
+          this.state = MerchantState.AWAITING_CONFIRM;
+          this.emit('stateChanged', this.state);
+        }
+      }
     }
 
     this.emit('exchangeUpdated', this.currentExchange);
@@ -390,6 +431,11 @@ export class MerchantEngine extends EventEmitter {
     if (!this.currentExchange) return;
 
     if (party === ExchangeParty.Them) {
+      const sell = this.currentExchange.sell;
+      if (sell && amount !== sell.price) {
+        this.cancelUnsafeOffer('Buyer changed the approved gold amount');
+        return;
+      }
       this.currentExchange.theirGold = amount;
       // They added gold — check if we should fill our side (SELL listing)
       this.tryAutoFill();
@@ -405,7 +451,14 @@ export class MerchantEngine extends EventEmitter {
   private onExchangeAccepted(party: number): void {
     if (!this.currentExchange) return;
 
-    if (party === ExchangeParty.Them) {
+    if (party === ExchangeParty.Completed) {
+      const sell = this.currentExchange.sell;
+      if (sell) {
+        sell.serverCompleted = true;
+        this.finalizeSaleIfReady();
+      }
+      return;
+    } else if (party === ExchangeParty.Them) {
       this.currentExchange.theyAccepted = true;
       // They clicked Accept — now check if we should fill our side
       this.tryAutoFill();
@@ -413,7 +466,19 @@ export class MerchantEngine extends EventEmitter {
       this.currentExchange.weAccepted = true;
     }
 
-    // If both accepted, record the trade
+    const sell = this.currentExchange.sell;
+    if (sell && sell.echoesRemaining === 0 && this.currentExchange.theyAccepted && !sell.acceptSent) {
+      sell.acceptSent = true;
+      this.emit('requestAccept', this.currentExchange.targetId);
+      return;
+    }
+
+    // SELL completion requires subtype 2 plus authoritative inventory/gold updates.
+    if (sell) {
+      this.emit('exchangeUpdated', this.currentExchange);
+      return;
+    }
+    // Legacy BUY/TRADE completion remains driven by their acceptance events.
     if (this.currentExchange.theyAccepted && this.currentExchange.weAccepted) {
       const queuedRequest = this.whisperQueue.find(
         (w) => w.playerName === this.currentExchange!.targetName && w.matchedListing,
@@ -446,9 +511,8 @@ export class MerchantEngine extends EventEmitter {
    * then added gold, they'd need to re-accept but the engine would already be in
    * AWAITING_CONFIRM state and would never re-trigger the fill.
    *
-   * For SELL listings, we wait for them to accept first since we need to validate
-   * the gold amount they placed. Our item placement will reset their accept, and
-   * they'll need to re-accept after seeing our items.
+   * SELL placement starts from the exact server-observed gold offer. Acceptance is
+   * deliberately later, after every server ItemAdded echo.
    */
   private tryAutoFill(): void {
     if (!this.currentExchange) return;
@@ -496,17 +560,33 @@ export class MerchantEngine extends EventEmitter {
       : listing.price * requestedQty;
 
     if (listing.type === 'SELL') {
-      // We're selling: wait for their accept, then validate gold and place item
-      if (!this.currentExchange.theyAccepted) return;
-
-      if (this.currentExchange.theirGold >= totalPrice) {
-        console.log(`[MerchantEngine] Gold validated (${this.currentExchange.theirGold} >= ${totalPrice} for ${requestedQty}x, stackSize=${listing.stackSize ?? 'none'}) and they accepted, filling sell`);
-        this.state = MerchantState.FILLING;
-        this.emit('stateChanged', this.state);
-        this.emit('requestFillSell', listing, this.currentExchange.targetId, requestedQty);
-      } else {
-        console.log(`[MerchantEngine] Gold insufficient: ${this.currentExchange.theirGold} < ${totalPrice} needed for ${requestedQty}x at ${listing.price} each (stackSize=${listing.stackSize ?? 'none'})`);
+      if (this.currentExchange.theirGold === 0) return;
+      if (this.currentExchange.theirItems.length || this.currentExchange.theirGold !== totalPrice ||
+          requestedQty > listing.quantityRemaining || requestedQty < 1 ||
+          (listing.stackSize && requestedQty % listing.stackSize !== 0)) {
+        this.cancelUnsafeOffer('Sale offer no longer exactly matches the listing');
+        return;
       }
+      const matching = this.whisperQueue.filter(w => w.playerName === this.currentExchange!.targetName && w.matchedListing);
+      if (matching.length !== 1) {
+        this.cancelUnsafeOffer('Ambiguous sale request');
+        return;
+      }
+      const slots = this.reserveSaleSlots(listing, requestedQty);
+      if (!slots) {
+        this.cancelUnsafeOffer('Exact sale quantity is unavailable');
+        return;
+      }
+      const reservation: SellReservation = {
+        listing, quantity: requestedQty, price: totalPrice, slots,
+        echoesRemaining: slots.length, baselineGold: this.inventoryTracker.getGold(),
+        serverCompleted: false, acceptSent: false,
+      };
+      this.currentExchange.sell = reservation;
+      this.currentExchange.theyAccepted = false; // placement invalidates an early accept
+      this.state = MerchantState.FILLING;
+      this.emit('stateChanged', this.state);
+      this.emit('requestFillSell', reservation, this.currentExchange.targetId);
     } else if (listing.type === 'BUY') {
       // We're buying: validate item presence, then place gold immediately.
       // Don't wait for their accept — placing gold would reset it anyway.
@@ -547,10 +627,50 @@ export class MerchantEngine extends EventEmitter {
   }
 
   onFillComplete(): void {
+    if (this.currentExchange?.sell) return;
     this.state = MerchantState.AWAITING_CONFIRM;
     this.emit('stateChanged', this.state);
     this.emit('requestAccept', this.currentExchange?.targetId ?? 0);
   }
+
+  private reserveSaleSlots(listing: MerchantListing, quantity: number): SellReservation['slots'] | undefined {
+    let remaining = quantity;
+    const slots: SellReservation['slots'] = [];
+    for (const slot of this.inventoryTracker.findAllSlotsByName(listing.itemName)) {
+      const item = this.inventoryTracker.getItem(slot)!;
+      if (item.isStackable) {
+        if (item.quantity < remaining) continue; // one prompt must carry the exact reservation
+        slots.push({ slot, quantity: remaining, initialQuantity: item.quantity, sprite: item.sprite, stackable: true });
+        remaining = 0;
+      } else {
+        slots.push({ slot, quantity: 1, initialQuantity: 1, sprite: item.sprite, stackable: false });
+        remaining--;
+      }
+      if (remaining === 0) return slots;
+    }
+    return undefined;
+  }
+
+  private cancelUnsafeOffer(reason: string): void {
+    const targetId = this.currentExchange?.targetId;
+    this.emit('validationFailed', reason);
+    if (targetId !== undefined) this.emit('requestCancel', targetId);
+    this.resetState();
+  }
+
+  private finalizeSaleIfReady(): void {
+    const exchange = this.currentExchange;
+    const sell = exchange?.sell;
+    if (!exchange || !sell || !sell.serverCompleted) return;
+    const inventoryRemoved = sell.slots.every((reserved) => {
+      const now = this.inventoryTracker.getItem(reserved.slot);
+      return !now || now.name.toLowerCase() !== sell.listing.itemName.toLowerCase() ||
+        now.quantity <= (reserved.stackable ? reserved.initialQuantity - reserved.quantity : 0);
+    });
+    if (!inventoryRemoved || this.inventoryTracker.getGold() !== sell.baselineGold + sell.price) return;
+    this.onTradeComplete(sell.listing, sell.quantity);
+  }
+
 
   onTradeComplete(listing: MerchantListing, tradedQuantity: number = 1): void {
     if (this.exchangeTimeout) {

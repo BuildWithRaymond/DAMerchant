@@ -1,11 +1,12 @@
 {
   "name": "merchantmode",
-  "version": "1.1.6",
+  "version": "1.1.7",
   "description": "Windows desktop companion for automated Dark Ages trading and AislingExchange listings",
   "main": "dist-electron/electron/main.js",
   "scripts": {
     "dev": "vite",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.node.json --noEmit",
+    "test": "tsx --test tests/*.test.ts",
     "build": "npm run typecheck && vite build && tsc -p tsconfig.node.json",
     "electron:dev": "npm run build && node scripts/launch-electron.js",
     "preview": "vite preview",
@@ -50,7 +51,13 @@
     "type": "git",
     "url": "git+https://github.com/BuildWithRaymond/merchantmode.git"
   },
-  "keywords": ["dark-ages", "merchant", "aislingexchange", "electron", "trading"],
+  "keywords": [
+    "dark-ages",
+    "merchant",
+    "aislingexchange",
+    "electron",
+    "trading"
+  ],
   "author": "NismoSan",
   "engines": {
     "node": ">=22"
@@ -69,6 +76,7 @@
     "electron": "^41.0.2",
     "electron-builder": "^26.8.1",
     "tailwindcss": "^4.2.1",
+    "tsx": "^4.23.15",
     "typescript": "^5.9.3",
     "vite": "^6.4.1"
   },

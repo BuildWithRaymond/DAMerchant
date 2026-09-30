@@ -16,11 +16,13 @@ The NSIS installer is written to `release/`. This command explicitly disables pu
 
 1. Start from a clean checkout and update `CHANGELOG.md`.
 2. Run `npm version patch --no-git-tag-version` (or `minor` / `major`) to update both package manifests.
-3. Run `npm run dist:local` and complete the relevant app checks.
+3. Run `npm test`, `npm run dist:local`, and complete the relevant app checks. The packet tests use simulated exchanges only.
 4. Commit the version and changelog with a Conventional Commit and push.
 5. Supply a `GH_TOKEN` authorized to create releases in `BuildWithRaymond/merchantmode` through your shell environment or secret manager. Do not put it in a tracked file. The build does not load `.env` automatically.
 6. Run `npm run dist` to build and upload the release artifacts.
 7. Review the release on GitHub and publish it if it is a draft. Keep the installer, blockmap and `latest.yml` together so Electron's updater can resolve the release.
+
+For a manual asset upload, name the installer and blockmap exactly as `latest.yml` expects. A local NSIS build may write filenames with spaces while the updater metadata uses hyphens.
 
 ## App updates
 

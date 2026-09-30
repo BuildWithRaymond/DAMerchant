@@ -28,6 +28,7 @@ Merchant Mode is a Windows desktop app for running a shop in **Dark Ages**. Crea
 
 - **Sell, buy and barter.** Set prices, quantities, stack sizes and wanted items. Listings pause when inventory or funds are unavailable.
 - **Turn whispers into trades.** Match incoming messages to listings, send configurable replies, and fill exchange windows.
+- **Confirm the visible sale.** For SELL listings, place the item after the buyer offers the exact price, then accept only after the server shows the item and the buyer accepts that offer. Changed offers cancel the exchange.
 - **Keep characters organized.** Separate inventory, listings and engine state for each connected character, with automatic reconnect support.
 - **Reach the wider market.** Browse online merchants and sync selected listings with your AislingExchange account.
 - **See what happened.** Review matched whispers and both sides of completed exchanges, then export transaction history to CSV.
@@ -81,6 +82,7 @@ npm run electron:dev
 | `npm run dev` | Start the Vite renderer server; no Electron bridge or game connection |
 | `npm run electron:dev` | Build and launch the desktop app |
 | `npm run typecheck` | Check renderer and Electron TypeScript configurations |
+| `npm test` | Run simulated exchange packet tests without a game account |
 | `npm run build` | Check types and build both renderer and Electron code |
 | `npm run dist:local` | Build a Windows installer without publishing |
 | `npm run screenshots` | Capture the renderer with offline sample data |

@@ -18,11 +18,12 @@ npm run electron:dev
 ## Checks
 
 ```sh
+npm test
 npm run typecheck
 npm run build
 ```
 
-The build checks both TypeScript configurations, bundles the renderer, and compiles the Electron entry points. There is no automated live-game integration suite; describe any manual trading, inventory, reconnect, or sync checks in your PR. Do not claim those paths were tested from a renderer capture alone.
+The tests simulate exchange packets without a game account. The build checks both TypeScript configurations, bundles the renderer, and compiles the Electron entry points. There is no automated live-game integration suite; describe any manual trading, inventory, reconnect, or sync checks in your PR. Do not claim those paths were tested from a renderer capture alone.
 
 ### Enable GitHub Actions
 

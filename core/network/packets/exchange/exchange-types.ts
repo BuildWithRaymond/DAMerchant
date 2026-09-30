@@ -19,4 +19,6 @@ export enum ExchangeServerEvent {
 export enum ExchangeParty {
   You = 0,
   Them = 1,
+  /** Packet captures use subtype 2 for the server's final, successful exchange result. */
+  Completed = 2,
 }

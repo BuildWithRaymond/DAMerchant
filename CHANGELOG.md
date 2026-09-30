@@ -1,6 +1,14 @@
 # Changelog
 
-## Unreleased
+## v1.1.7
+
+### Bug Fixes
+- SELL exchanges now place the reserved item as soon as the server reports the buyer's exact gold offer. Stack prompts use the reserved slot and quantity, and seller acceptance waits for the server's item echo and the buyer's acceptance of the visible offer.
+- Changed gold, extra buyer items, mismatched item echoes, missing inventory, and stalled exchanges cancel the sale. Repeated gold packets cannot place the item twice.
+- A SELL transaction is recorded only after the server's completion event and matching inventory and gold updates; acceptance events alone do not record a sale.
+
+### Validation
+- Added simulated exchange packet tests for placement order, stack quantities, early acceptance, duplicate offers, cancellation, and exactly-once completion. No live accounts or trades are used.
 
 ### Maintenance
 - Removed unreachable legacy packet wrappers, unused UI and helper modules, unused dependencies, and personal agent settings.
