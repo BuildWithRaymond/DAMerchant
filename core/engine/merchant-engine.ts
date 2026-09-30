@@ -50,6 +50,17 @@ export interface SellReservation {
   acceptSent: boolean;
 }
 
+function matchesSaleEchoName(expectedName: string, echoedName: string): boolean {
+  const expected = expectedName.toLowerCase();
+  const echoed = echoedName.toLowerCase();
+  if (echoed === expected) return true;
+  if (!echoed.startsWith(`${expected} `)) return false;
+
+  // The server appends durability to some item names in the exchange window.
+  const suffix = echoed.slice(expected.length + 1);
+  return /^(?:100|[1-9]?\d)%$/.test(suffix);
+}
+
 export class MerchantEngine extends EventEmitter {
   private state: MerchantState = MerchantState.IDLE;
   private listings: MerchantListing[] = [];
@@ -403,17 +414,41 @@ export class MerchantEngine extends EventEmitter {
         this.cancelUnsafeOffer('Buyer changed the approved gold-only offer');
         return;
       }
+      const request = this.whisperQueue.find(
+        (w) => w.playerName === this.currentExchange!.targetName && w.matchedListing,
+      );
+      const listing = request?.matchedListing;
+      const expectedName = listing?.type === 'BUY' ? listing.itemName
+        : listing?.type === 'TRADE' ? listing.wantedItems?.[0]?.name
+        : undefined;
+      if (!expectedName || !matchesSaleEchoName(expectedName, name)) {
+        this.cancelUnsafeOffer(`Partner offered an item unrelated to a listing: "${name}"`);
+        return;
+      }
       // They added an item — check if we should fill our side (BUY listing)
       this.tryAutoFill();
+      if (!this.currentExchange) return;
     } else {
       this.currentExchange.ourItems.push(item);
-      // Adding an item on our side resets their accept in the game server
+      // Changing the visible offer invalidates earlier acceptance flags.
       this.currentExchange.theyAccepted = false;
+      this.currentExchange.weAccepted = false;
       const sell = this.currentExchange.sell;
       if (sell) {
         const expected = sell.slots[sell.slots.length - sell.echoesRemaining];
-        if (!expected || name.toLowerCase() !== sell.listing.itemName.toLowerCase() || sprite !== expected.sprite) {
-          this.cancelUnsafeOffer('Server echoed an unexpected sale item');
+        if (!expected) {
+          this.cancelUnsafeOffer(`Server echoed an extra sale item: received "${name}" (sprite ${sprite & 0x3FFF}, index ${index})`);
+          return;
+        }
+        // Inventory and exchange packets may carry different item/creature flag bits.
+        // The low 14 bits are the actual item sprite in both packet types.
+        if (!matchesSaleEchoName(sell.listing.itemName, name) ||
+            (sprite & 0x3FFF) !== (expected.sprite & 0x3FFF)) {
+          this.cancelUnsafeOffer(
+            `Server echoed an unexpected sale item: expected "${sell.listing.itemName}" ` +
+            `(sprite ${expected.sprite & 0x3FFF}, slot ${expected.slot}), received "${name}" ` +
+            `(sprite ${sprite & 0x3FFF}, raw ${sprite}, index ${index})`
+          );
           return;
         }
         sell.echoesRemaining--;
@@ -441,8 +476,9 @@ export class MerchantEngine extends EventEmitter {
       this.tryAutoFill();
     } else {
       this.currentExchange.ourGold = amount;
-      // Adding gold on our side resets their accept in the game server
+      // Changing the visible offer invalidates earlier acceptance flags.
       this.currentExchange.theyAccepted = false;
+      this.currentExchange.weAccepted = false;
     }
 
     this.emit('exchangeUpdated', this.currentExchange);
@@ -473,9 +509,10 @@ export class MerchantEngine extends EventEmitter {
       return;
     }
 
-    // SELL completion requires subtype 2 plus authoritative inventory/gold updates.
+    // SELL completion still requires authoritative inventory and gold updates.
     if (sell) {
-      this.emit('exchangeUpdated', this.currentExchange);
+      this.finalizeSaleIfReady();
+      if (this.currentExchange) this.emit('exchangeUpdated', this.currentExchange);
       return;
     }
     // Legacy BUY/TRADE completion remains driven by their acceptance events.
@@ -627,7 +664,7 @@ export class MerchantEngine extends EventEmitter {
   }
 
   onFillComplete(): void {
-    if (this.currentExchange?.sell) return;
+    if (!this.currentExchange || this.currentExchange.sell || this.state !== MerchantState.FILLING) return;
     this.state = MerchantState.AWAITING_CONFIRM;
     this.emit('stateChanged', this.state);
     this.emit('requestAccept', this.currentExchange?.targetId ?? 0);
@@ -653,6 +690,7 @@ export class MerchantEngine extends EventEmitter {
 
   private cancelUnsafeOffer(reason: string): void {
     const targetId = this.currentExchange?.targetId;
+    console.warn(`[MerchantEngine] Canceling exchange: ${reason}`);
     this.emit('validationFailed', reason);
     if (targetId !== undefined) this.emit('requestCancel', targetId);
     this.resetState();
@@ -661,7 +699,10 @@ export class MerchantEngine extends EventEmitter {
   private finalizeSaleIfReady(): void {
     const exchange = this.currentExchange;
     const sell = exchange?.sell;
-    if (!exchange || !sell || !sell.serverCompleted) return;
+    if (!exchange || !sell) return;
+    // Some successful exchanges have acceptance echoes but no subtype-2 result.
+    // Neither acceptance alone nor item removal alone proves a completed sale.
+    if (!sell.serverCompleted && !(sell.acceptSent && exchange.theyAccepted && exchange.weAccepted)) return;
     const inventoryRemoved = sell.slots.every((reserved) => {
       const now = this.inventoryTracker.getItem(reserved.slot);
       return !now || now.name.toLowerCase() !== sell.listing.itemName.toLowerCase() ||
@@ -678,12 +719,16 @@ export class MerchantEngine extends EventEmitter {
       this.exchangeTimeout = null;
     }
 
+    // Inventory changes may reload listings while the exchange is still open.
+    // Update the object currently held by the engine so persistence sees the sale.
+    const currentListing = this.listings.find((entry) => entry.id === listing.id) ?? listing;
+
     // Update listing quantity
     // For TRADE, decrement by 1 (one trade completed); for BUY/SELL, by traded quantity
     const decrementBy = listing.type === 'TRADE' ? 1 : tradedQuantity;
-    listing.quantityRemaining -= decrementBy;
-    if (listing.quantityRemaining <= 0) {
-      listing.status = 'SOLD_OUT';
+    currentListing.quantityRemaining = Math.max(0, currentListing.quantityRemaining - decrementBy);
+    if (currentListing.quantityRemaining <= 0) {
+      currentListing.status = 'SOLD_OUT';
     }
 
     const totalPrice = listing.stackSize
@@ -710,7 +755,7 @@ export class MerchantEngine extends EventEmitter {
 
     const transaction: Transaction = {
       id: crypto.randomUUID(),
-      listingId: listing.id,
+      listingId: currentListing.id,
       characterName: this.characterName,
       counterpartyName: this.currentExchange?.targetName ?? 'Unknown',
       type: listing.type,
@@ -725,11 +770,6 @@ export class MerchantEngine extends EventEmitter {
     this.transactions.push(transaction);
     this.emit('transactionCompleted', transaction);
 
-    // Remove from whisper queue
-    this.whisperQueue = this.whisperQueue.filter(
-      (w) => w.playerName !== this.currentExchange?.targetName,
-    );
-
     this.resetState();
   }
 
@@ -737,6 +777,12 @@ export class MerchantEngine extends EventEmitter {
     if (this.exchangeTimeout) {
       clearTimeout(this.exchangeTimeout);
       this.exchangeTimeout = null;
+    }
+    // The request belongs to this exchange. A later attempt must match the
+    // current listing and price, including after a cancellation or timeout.
+    if (this.currentExchange) {
+      const partner = this.currentExchange.targetName;
+      this.whisperQueue = this.whisperQueue.filter((w) => w.playerName !== partner);
     }
     this.currentExchange = null;
     this.state = MerchantState.IDLE;

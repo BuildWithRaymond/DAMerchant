@@ -1,9 +1,11 @@
 import { app, BrowserWindow, ipcMain, dialog, Menu, shell } from 'electron';
 import { autoUpdater } from 'electron-updater';
 import path from 'path';
+import { mkdirSync } from 'fs';
 import { ProxyServer } from '../core/proxy/proxy-server';
 import { ProxyConnection } from '../core/proxy/proxy-connection';
 import { MerchantEngine, type SellReservation } from '../core/engine/merchant-engine';
+import { customGroupEnabled, groupAppearance, LEGACY_GROUP_TITLE, LEGACY_GROUP_DESCRIPTION } from '../core/engine/merchant-group';
 import { InventoryTracker } from '../core/engine/inventory-tracker';
 import { LocationTracker } from '../core/engine/location-tracker';
 import { MerchantHubClient } from '../core/network/merchant-hub-client';
@@ -21,6 +23,11 @@ import { ListingSync } from '../core/ae/listing-sync';
 import { patchDisplayAisling } from '../core/engine/display-modifier';
 import { ReconnectManager } from '../core/reconnect/reconnect-manager';
 
+// Keep existing listings, history and credentials in their original data directory.
+// Changing productName otherwise changes Electron's default userData path.
+const legacyUserDataPath = path.join(app.getPath('appData'), 'merchantmode');
+mkdirSync(legacyUserDataPath, { recursive: true });
+app.setPath('userData', legacyUserDataPath);
 
 let mainWindow: BrowserWindow | null = null;
 let proxyServer: ProxyServer | null = null;
@@ -82,7 +89,7 @@ function createWindow() {
     height: 860,
     minWidth: 900,
     minHeight: 600,
-    title: 'Merchant Mode',
+    title: 'DAMerchant',
     icon: path.join(__dirname, '../../build/icon.ico'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -225,6 +232,8 @@ function createCharacterContext(characterName: string, connection: ProxyConnecti
       // Sync updated listing to AE
       listingSync.syncUpdate(listing).catch(err => console.error('[AE Sync] tx-update failed:', err));
     }
+    engine.emit('listingsUpdated', engine.getListings());
+    send('listings:changed', { characterName });
     // Also sync transaction as a price entry on AE
     const txItem = tx.itemsGiven?.[0] || tx.itemsReceived?.[0];
     if (txItem) {
@@ -368,13 +377,24 @@ function createCharacterContext(characterName: string, connection: ProxyConnecti
   let currentGroupDesc = '';
   const GROUP_REFRESH_MS = 25_000;
 
+  function currentGroupAppearance() {
+    const savedTitle = db.getSetting(`group_title:${characterName}`, '');
+    const savedDescription = db.getSetting(`group_description:${characterName}`, '');
+    const customSetting = db.getSetting(`group_custom_enabled:${characterName}`, '');
+    return groupAppearance(
+      engine.getListings(),
+      customGroupEnabled(customSetting, savedTitle || LEGACY_GROUP_TITLE, savedDescription || LEGACY_GROUP_DESCRIPTION),
+      savedTitle || LEGACY_GROUP_TITLE,
+      savedDescription || LEGACY_GROUP_DESCRIPTION,
+    );
+  }
+
   function updateMerchantGroup() {
     const groupEnabled = db.getSetting(`group_enabled:${characterName}`, 'true') === 'true';
     const activeListings = engine.getListings().filter(l => l.status === 'ACTIVE' && l.quantityRemaining > 0);
     const shouldHaveGroup = groupEnabled && activeListings.length > 0;
 
-    const title = db.getSetting(`group_title:${characterName}`, 'Merchant');
-    const description = db.getSetting(`group_description:${characterName}`, "Check AislingExchange for listings or whisper 'whats for sale?'");
+    const { title, description } = currentGroupAppearance();
 
     if (shouldHaveGroup) {
       injectGroupCreate(characterName, title, description);
@@ -386,9 +406,8 @@ function createCharacterContext(characterName: string, connection: ProxyConnecti
       if (!groupRefreshIntervals.has(characterName)) {
         const interval = setInterval(() => {
           if (groupActive) {
-            const t = db.getSetting(`group_title:${characterName}`, 'Merchant');
-            const d = db.getSetting(`group_description:${characterName}`, "Check AislingExchange for listings or whisper 'whats for sale?'");
-            injectGroupCreate(characterName, t, d);
+            const appearance = currentGroupAppearance();
+            injectGroupCreate(characterName, appearance.title, appearance.description);
           }
         }, GROUP_REFRESH_MS);
         groupRefreshIntervals.set(characterName, interval);
@@ -1213,7 +1232,7 @@ function registerIpcHandlers() {
   ipcMain.handle('settings:set', (_e, key: string, value: string) => {
     db.setSetting(key, value);
     // If a per-character group setting changed, refresh only that character's merchant group
-    if (key.startsWith('group_enabled:') || key.startsWith('group_title:') || key.startsWith('group_description:')) {
+    if (key.startsWith('group_enabled:') || key.startsWith('group_custom_enabled:') || key.startsWith('group_title:') || key.startsWith('group_description:')) {
       const charName = key.substring(key.indexOf(':') + 1);
       const ctx = characterContexts.get(charName);
       if (ctx) {

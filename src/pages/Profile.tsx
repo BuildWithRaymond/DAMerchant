@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { ArrowLeft, ExternalLink, User, ShoppingBag, Wifi, WifiOff, Shield, Monitor } from 'lucide-react';
-import { getSpriteDataUrl, getAvatarData, type AvatarData } from '../lib/ae-api';
+import { getSpriteDataUrl } from '../lib/ae-api';
 
 interface Props {
   playerName: string;
@@ -33,7 +33,6 @@ interface AeListing {
 export default function Profile({ playerName, onBack }: Props) {
   const [profile, setProfile] = useState<PlayerProfile | null>(null);
   const [spriteUrl, setSpriteUrl] = useState<string | null>(null);
-  const [avatar, setAvatar] = useState<AvatarData | null>(null);
   const [listings, setListings] = useState<AeListing[]>([]);
   const [merchantListings, setMerchantListings] = useState<GlobalMerchantListing[]>([]);
   const [merchantLocation, setMerchantLocation] = useState<{ mapName: string; x: number; y: number } | null>(null);
@@ -46,10 +45,9 @@ export default function Profile({ playerName, onBack }: Props) {
     async function load() {
       setLoading(true);
 
-      const [profileResult, spriteResult, avatarResult, listingsResult] = await Promise.all([
+      const [profileResult, spriteResult, listingsResult] = await Promise.all([
         window.merchantMode?.ae.getPlayerProfile(playerName).catch(() => null),
         getSpriteDataUrl(playerName).catch(() => null),
-        getAvatarData(playerName).catch(() => null),
         window.merchantMode?.ae.getPlayerListings(playerName).catch(() => null),
       ]);
 
@@ -57,7 +55,6 @@ export default function Profile({ playerName, onBack }: Props) {
 
       setProfile(profileResult || { name: playerName });
       setSpriteUrl(spriteResult || null);
-      setAvatar(avatarResult || null);
 
       if (listingsResult) {
         setListings(listingsResult.data || []);
@@ -129,15 +126,11 @@ export default function Profile({ playerName, onBack }: Props) {
             <div className="flex items-start gap-5">
               {/* Sprite */}
               {spriteUrl ? (
-                <div style={{
+                <div className="character-portrait" style={{
                   width: 80, height: 80, borderRadius: 12,
                   backgroundImage: `url(${spriteUrl})`,
-                  backgroundSize: `${avatar?.zoom ?? 220}%`,
-                  backgroundPosition: `${avatar?.offsetX ?? 50}% ${avatar?.offsetY ?? 20}%`,
-                  backgroundRepeat: 'no-repeat',
-                  imageRendering: 'pixelated',
                   border: '1px solid rgba(201,168,76,0.3)',
-                  flexShrink: 0,
+                  flexShrink: 0, overflow: 'hidden',
                 }} />
               ) : (
                 <div style={{
@@ -201,13 +194,13 @@ export default function Profile({ playerName, onBack }: Props) {
             </div>
           </div>
 
-          {/* Merchant Mode Listings (live bot) */}
+          {/* DAMerchant listings (live bot) */}
           {merchantListings.length > 0 && (
             <div className="section-card animate-slide-up" style={{ animationDelay: '140ms' }}>
               <div className="section-header">
                 <Monitor size={16} className="section-icon" />
                 <h3 style={{ margin: 0, fontSize: 14, fontWeight: 600 }} className="gold-text">
-                  Merchant Mode
+                  DAMerchant
                 </h3>
                 <span style={{ fontSize: 11, color: 'var(--color-success)', fontWeight: 500 }}>
                   Online

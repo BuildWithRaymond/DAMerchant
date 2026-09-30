@@ -1,5 +1,18 @@
 # Changelog
 
+## v1.1.9
+
+### New name and group titles
+- Merchant Mode is now **DAMerchant** throughout the app, installer, documentation and repository screenshots. Existing local listings, settings and History keep their original data location.
+- The in-game group title now reflects active listing types (`S> ITEMS`, `B/S> ITEMS`, `T> ITEMS` and other combinations). The default description asks players to whisper `list`; the Dashboard can switch to a custom title and description.
+- Character portraits now frame the head and upper body consistently across tabs, listings, profiles, merchant cards and History.
+
+### Trading fixes
+- SELL exchanges accept durability suffixes and sprite flag bits in server item echoes while checking the item identity. Seller acceptance still waits for the item to appear and the buyer to accept that visible offer.
+- Completed SELL exchanges now record History and decrement the current listing after matching inventory removal and the exact gold increase, including when an inventory update reloads listings or the server omits a completion subtype.
+- Exchanges containing items unrelated to the matched listing cancel promptly. A delayed BUY or TRADE fill callback cannot accept a canceled exchange.
+- Added simulated packet tests for these cases. No live account or trade was used in testing.
+
 ## v1.1.8
 
 ### Bug Fixes

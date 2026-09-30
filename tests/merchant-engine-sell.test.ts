@@ -47,11 +47,27 @@ function accepted(engine: MerchantEngine, subtype: ExchangeParty) {
   engine.processServerPacket(ServerOpCode.Exchange, exchange(ExchangeServerEvent.Accepted, w => w.writeUint8(subtype)));
 }
 
-function itemEcho(engine: MerchantEngine, name = 'Blue Hair', sprite = 321) {
+function itemEcho(engine: MerchantEngine, name = 'Blue Hair', sprite = 321, index = 0) {
   engine.processServerPacket(ServerOpCode.Exchange, exchange(ExchangeServerEvent.ItemAdded, w => {
-    w.writeUint8(ExchangeParty.You); w.writeUint8(0); w.writeUint16(sprite);
+    w.writeUint8(ExchangeParty.You); w.writeUint8(index); w.writeUint16(sprite);
     w.writeUint8(0); w.writeString8(name);
   }));
+}
+
+function stickFixture() {
+  const inventory = new InventoryTracker();
+  inventory.getState().items.set(1, {
+    slot: 1, sprite: 0x8000 | 86, color: 0, name: 'stick', quantity: 1,
+    isStackable: false, maxDurability: 100, durability: 100,
+  });
+  const engine = new MerchantEngine(inventory);
+  const sale = { ...listing(), itemName: 'stick', price: 1000, quantity: 1,
+    quantityRemaining: 1, stackSize: undefined };
+  engine.setListings([sale]);
+  engine.processServerPacket(ServerOpCode.Exchange, exchange(ExchangeServerEvent.Started, w => {
+    w.writeUint32(99); w.writeString8('Buyer');
+  }));
+  return { engine, sale, inventory };
 }
 
 test('gold reserves and places the item before buyer Accept, only once', () => {
@@ -82,6 +98,93 @@ test('matching stack prompt sends exact reserved slot and quantity; echo precede
   assert.equal(accepts, 0);
   accepted(engine, ExchangeParty.Them);
   assert.equal(accepts, 1);
+});
+
+test('item echo with different sprite flag bits still confirms the reserved item', () => {
+  const { engine, inventory } = fixture();
+  inventory.getState().items.get(7)!.sprite = 0x8000 | 321;
+  let cancelled = 0;
+  let accepts = 0;
+  engine.on('requestCancel', () => cancelled++);
+  engine.on('requestAccept', () => accepts++);
+  gold(engine);
+  itemEcho(engine, 'Blue Hair', 321);
+  assert.equal(cancelled, 0);
+  accepted(engine, ExchangeParty.Them);
+  assert.equal(accepts, 1);
+});
+
+test('durability percentage in a server item echo confirms the exact reserved sale item', () => {
+  const { engine, inventory, sale } = stickFixture();
+  let cancelled = 0;
+  let accepts = 0;
+  let completed = 0;
+  engine.on('requestCancel', () => cancelled++);
+  engine.on('requestAccept', () => accepts++);
+  engine.on('transactionCompleted', () => completed++);
+  gold(engine, 1000);
+  itemEcho(engine, 'Stick 100%', 0x8000 | 86, 1);
+  assert.equal(cancelled, 0);
+  assert.equal(accepts, 0);
+  accepted(engine, ExchangeParty.Them);
+  assert.equal(accepts, 1);
+  accepted(engine, ExchangeParty.You);
+  engine.processServerPacket(ServerOpCode.Exchange, Buffer.from(acceptedFixtures.exchangeCompleted, 'hex'));
+  assert.equal(completed, 0);
+  inventory.getState().items.delete(1);
+  inventory.emit('itemRemoved');
+  inventory.getState().gold = 1000;
+  inventory.emit('goldUpdated');
+  assert.equal(completed, 1);
+  assert.equal(sale.quantityRemaining, 0);
+});
+
+test('a different item name or invalid durability suffix cannot confirm the sale', () => {
+  for (const echoedName of ['Stick of Power 100%', 'Stick 101%']) {
+    const { engine } = stickFixture();
+    let cancelled = 0;
+    engine.on('requestCancel', () => cancelled++);
+    gold(engine, 1000);
+    itemEcho(engine, echoedName, 0x8000 | 86, 1);
+    assert.equal(cancelled, 1, echoedName);
+  }
+});
+
+test('a valid durability suffix remains display metadata for the same item', () => {
+  const { engine } = stickFixture();
+  let cancelled = 0;
+  engine.on('requestCancel', () => cancelled++);
+  gold(engine, 1000);
+  itemEcho(engine, 'Stick 80%', 0x8000 | 86, 1);
+  assert.equal(cancelled, 0);
+});
+
+test('item echo with a different base sprite still cancels the sale', () => {
+  const { engine } = fixture();
+  let cancelled = 0;
+  let reason = '';
+  engine.on('requestCancel', () => cancelled++);
+  engine.on('validationFailed', (message: string) => reason = message);
+  gold(engine);
+  itemEcho(engine, 'Blue Hair', 0x8000 | 322);
+  assert.equal(cancelled, 1);
+  assert.match(reason, /expected.*Blue Hair.*321.*received.*322/i);
+});
+
+test('a canceled exchange discards its old match so a retry uses the current listing', () => {
+  const { engine, sale } = fixture();
+  const fills: SellReservation[] = [];
+  engine.on('requestFillSell', r => fills.push(r));
+  gold(engine);
+  gold(engine, 200); // changed offer cancels this exchange
+  assert.equal(engine.getWhisperQueue().length, 0);
+  engine.setListings([{ ...sale, price: 1000 }]);
+  engine.processServerPacket(ServerOpCode.Exchange, exchange(ExchangeServerEvent.Started, w => {
+    w.writeUint32(99); w.writeString8('Buyer');
+  }));
+  gold(engine, 1000);
+  assert.equal(fills.length, 2);
+  assert.equal(fills[1].price, 1000);
 });
 
 test('changed gold or extra buyer items cancel an approved sale', () => {
@@ -178,6 +281,63 @@ test('BUY and TRADE still fill when the partner item appears', () => {
   }
 });
 
+test('a SELL exchange cancels immediately when the partner offers an unrelated item', () => {
+  const { engine } = fixture();
+  let cancels = 0;
+  let fills = 0;
+  engine.on('requestCancel', () => cancels++);
+  engine.on('requestFillSell', () => fills++);
+  engine.processServerPacket(ServerOpCode.Exchange, exchange(ExchangeServerEvent.ItemAdded, w => {
+    w.writeUint8(ExchangeParty.Them); w.writeUint8(0); w.writeUint16(123);
+    w.writeUint8(0); w.writeString8('Unlisted Item');
+  }));
+  assert.equal(cancels, 1);
+  assert.equal(fills, 0);
+  assert.equal(engine.getState(), MerchantState.IDLE);
+});
+
+test('BUY and TRADE exchanges cancel an unrelated partner item', () => {
+  for (const kind of ['BUY', 'TRADE'] as const) {
+    const { engine, sale } = fixture();
+    sale.type = kind;
+    if (kind === 'TRADE') sale.wantedItems = [{ name: 'Wanted Item', quantity: 1 }];
+    let cancels = 0;
+    let fills = 0;
+    engine.on('requestCancel', () => cancels++);
+    engine.on(kind === 'BUY' ? 'requestFillBuy' : 'requestFillTrade', () => fills++);
+    engine.processServerPacket(ServerOpCode.Exchange, exchange(ExchangeServerEvent.ItemAdded, w => {
+      w.writeUint8(ExchangeParty.Them); w.writeUint8(0); w.writeUint16(123);
+      w.writeUint8(0); w.writeString8('Unlisted Item');
+    }));
+    assert.equal(cancels, 1, kind);
+    assert.equal(fills, 0, kind);
+    assert.equal(engine.getState(), MerchantState.IDLE, kind);
+  }
+});
+
+test('BUY and TRADE cancel an extra unrelated item after a matching item', () => {
+  for (const kind of ['BUY', 'TRADE'] as const) {
+    const { engine, sale } = fixture();
+    sale.type = kind;
+    if (kind === 'TRADE') sale.wantedItems = [{ name: 'Wanted Item', quantity: 1 }];
+    let cancels = 0;
+    let accepts = 0;
+    engine.on('requestCancel', () => cancels++);
+    engine.on('requestAccept', () => accepts++);
+    for (const name of [kind === 'BUY' ? 'Blue Hair' : 'Wanted Item', 'Unlisted Item']) {
+      engine.processServerPacket(ServerOpCode.Exchange, exchange(ExchangeServerEvent.ItemAdded, w => {
+        w.writeUint8(ExchangeParty.Them); w.writeUint8(0); w.writeUint16(123);
+        w.writeUint8(0); w.writeString8(name);
+      }));
+    }
+    assert.equal(cancels, 1, kind);
+    assert.equal(engine.getState(), MerchantState.IDLE, kind);
+    engine.onFillComplete(); // a delayed fill callback must not accept the cancelled exchange
+    assert.equal(accepts, 0, kind);
+    assert.equal(engine.getState(), MerchantState.IDLE, kind);
+  }
+});
+
 test('event-5 party subtypes are acceptance flags; subtype 2 plus inventory and gold completes once', () => {
   const { engine, inventory, sale } = fixture();
   let completed = 0;
@@ -197,4 +357,50 @@ test('event-5 party subtypes are acceptance flags; subtype 2 plus inventory and 
   assert.equal(sale.quantityRemaining, 90);
   inventory.emit('goldUpdated');
   assert.equal(completed, 1);
+});
+
+test('sale decrements the current listing after inventory-driven listing reload', () => {
+  const { engine, inventory, sale } = stickFixture();
+  let completed = 0;
+  let recordedPrice = 0;
+  engine.on('transactionCompleted', (tx) => { completed++; recordedPrice = tx.goldReceived; });
+  gold(engine, 1000);
+  itemEcho(engine, 'Stick 100%', 0x8000 | 86, 1);
+  accepted(engine, ExchangeParty.Them);
+  accepted(engine, ExchangeParty.You);
+  engine.processServerPacket(ServerOpCode.Exchange, Buffer.from(acceptedFixtures.exchangeCompleted, 'hex'));
+
+  inventory.getState().items.delete(1);
+  inventory.emit('itemRemoved');
+  engine.setListings([{ ...sale, price: 2000, status: 'PAUSED' }]); // main process reloads on inventory removal
+  inventory.getState().gold = 1000;
+  inventory.emit('goldUpdated');
+
+  assert.equal(completed, 1);
+  assert.equal(recordedPrice, 1000, 'record the agreed sale price even if the listing changed');
+  assert.equal(engine.getListings()[0].quantityRemaining, 0);
+  assert.equal(engine.getListings()[0].status, 'SOLD_OUT');
+});
+
+test('both server acceptance echoes plus exact inventory and gold changes complete a sale without subtype 2', () => {
+  const { engine, inventory, sale } = stickFixture();
+  let completed = 0;
+  engine.on('transactionCompleted', () => completed++);
+  inventory.on('itemRemoved', () => engine.setListings([{ ...sale, status: 'PAUSED' }]));
+  gold(engine, 1000);
+  itemEcho(engine, 'Stick 100%', 0x8000 | 86, 1);
+  accepted(engine, ExchangeParty.Them);
+  accepted(engine, ExchangeParty.You);
+  assert.equal(completed, 0, 'acceptance echoes alone do not prove completion');
+  engine.processServerPacket(ServerOpCode.RemoveItemFromPane, Uint8Array.of(1));
+  assert.equal(completed, 0, 'item leaving inventory during the exchange is not enough');
+  const attributes = new BinaryWriter();
+  attributes.writeUint8(0x08); // ExperienceGold field
+  for (let i = 0; i < 5; i++) attributes.writeUint32(0);
+  attributes.writeUint32(1000);
+  engine.processServerPacket(ServerOpCode.Attributes, attributes.toArray());
+  assert.equal(inventory.getItem(1), undefined);
+  assert.equal(inventory.getGold(), 1000);
+  assert.equal(completed, 1);
+  assert.equal(engine.getListings()[0].quantityRemaining, 0);
 });

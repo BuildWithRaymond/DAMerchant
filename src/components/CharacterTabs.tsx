@@ -39,15 +39,11 @@ function CharacterFace({ name }: { name: string }) {
 
   return (
     <div
-      className="flex-shrink-0 rounded-sm overflow-hidden"
+      className="flex-shrink-0 rounded-sm overflow-hidden character-portrait"
       style={{
         width: 18,
         height: 18,
         backgroundImage: `url(${spriteUrl})`,
-        backgroundSize: '250%',
-        backgroundPosition: '50% 8%',
-        backgroundRepeat: 'no-repeat',
-        imageRendering: 'pixelated',
         border: '1px solid rgba(201,168,76,0.2)',
       }}
     />

@@ -35,6 +35,7 @@ export default function App() {
   const [snifferLog, setSnifferLog] = useState<any[]>([]);
   const [launching, setLaunching] = useState(false);
   const [launchError, setLaunchError] = useState('');
+  const [exchangeErrors, setExchangeErrors] = useState<Record<string, string>>({});
   const [allMerchantsMode, setAllMerchantsMode] = useState(false);
   const [allMerchants, setAllMerchants] = useState<GlobalMerchantData[]>([]);
   const [profileTarget, setProfileTarget] = useState<string | null>(null);
@@ -99,6 +100,18 @@ export default function App() {
       setCharacterStates((prev) => ({ ...prev, [data.characterName]: data.state }));
     });
 
+    api.engine.onExchangeStarted(({ characterName }) => {
+      setExchangeErrors((prev) => {
+        const next = { ...prev };
+        delete next[characterName];
+        return next;
+      });
+    });
+
+    api.engine.onValidationFailed(({ characterName, reason }) => {
+      setExchangeErrors((prev) => ({ ...prev, [characterName]: reason }));
+    });
+
     api.engine.onTransaction((tx) => {
       setTransactions((prev) => [tx, ...prev]);
     });
@@ -156,7 +169,7 @@ export default function App() {
                 WebkitTextFillColor: 'transparent',
                 backgroundClip: 'text',
               }}>
-                Merchant Mode
+                DAMerchant
               </h1>
               <p className="text-[10px] leading-tight" style={{ color: 'var(--color-text-tertiary)', letterSpacing: '0.06em' }}>
                 AislingExchange.com
@@ -315,6 +328,11 @@ export default function App() {
         </div>
         <UpdateBanner />
         <ReconnectBanner />
+        {activeCharacter && exchangeErrors[activeCharacter] && (
+          <div role="alert" className="px-4 py-2 text-xs" style={{ color: 'var(--color-danger)', background: 'var(--color-surface-200)', borderBottom: '1px solid var(--color-surface-500)' }}>
+            Exchange canceled: {exchangeErrors[activeCharacter]}
+          </div>
+        )}
         {(page === 'dashboard' || page === 'listings') && (
           <CharacterTabs
             characters={characters}

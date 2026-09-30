@@ -2,6 +2,8 @@
 const path = require('node:path');
 const fs = require('node:fs/promises');
 const root = path.resolve(__dirname, '..');
+const screenshotVersion = require(path.join(root, 'package.json')).version;
+const screenshotName = (name) => `${name}-v${screenshotVersion}.png`;
 
 if (!process.versions.electron) {
   const { spawn } = require('node:child_process');
@@ -31,6 +33,7 @@ if (!process.versions.electron) {
     await window.loadFile(path.join(root, 'dist', 'index.html'));
     await window.webContents.insertCSS('* { animation: none !important; transition: none !important; }');
     for (const page of ['Dashboard', 'Listings', 'History']) {
+      console.log(`Preparing ${page} capture`);
       window.setContentSize(1280, page === 'Dashboard' ? 1200 : 820);
       await window.webContents.executeJavaScript(`
         (() => {
@@ -38,7 +41,11 @@ if (!process.versions.electron) {
           if (!button) throw new Error('Missing navigation: ' + ${JSON.stringify(page)});
           button.click();
         })()
-      `);
+      `).catch(async (error) => {
+        const state = await window.webContents.executeJavaScript(`({ title: document.title, body: document.body?.innerText?.slice(0, 500), nav: [...document.querySelectorAll('nav button')].map(b => b.textContent.trim()) })`).catch(() => null);
+        console.error('Capture navigation failed:', page, state, errors);
+        throw error;
+      });
       // Wait for React effects and image decoding, with a bounded render readiness check.
       await window.webContents.executeJavaScript(`
         new Promise((resolve, reject) => {
@@ -54,23 +61,39 @@ if (!process.versions.electron) {
             else setTimeout(check, 50);
           }; check();
         })
-      `);
+      `).catch(async (error) => {
+        const state = await window.webContents.executeJavaScript(`({ title: document.title, heading: document.querySelector('main h1')?.textContent, body: document.body?.innerText?.slice(0, 500) })`).catch(() => null);
+        console.error('Capture readiness failed:', page, state, errors);
+        throw error;
+      });
       const brokenImages = await window.webContents.executeJavaScript(`
         [...document.images].filter(image => !image.naturalWidth).map(image => image.getAttribute('src'))
       `);
       if (brokenImages.length) throw new Error(`Broken images: ${brokenImages.join(', ')}`);
       const image = await window.webContents.capturePage();
-      await fs.writeFile(path.join(output, `${page.toLowerCase()}.png`), image.toPNG());
+      await fs.writeFile(path.join(output, screenshotName(page.toLowerCase())), image.toPNG());
       console.log(`Captured ${page}: ${image.getSize().width} × ${image.getSize().height}`);
+      if (page === 'Dashboard') {
+        await window.webContents.executeJavaScript(`new Promise((resolve, reject) => {
+          const button = [...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Custom');
+          if (!button) return reject(new Error('Missing custom group mode'));
+          button.click();
+          requestAnimationFrame(() => {
+            const labels = [...document.querySelectorAll('label')].map(label => label.textContent.trim());
+            if (labels.some(label => label.includes('Group title')) && labels.some(label => label.includes('Group description'))) resolve();
+            else reject(new Error('Custom group fields did not appear'));
+          });
+        })`);
+      }
     }
     if (errors.length) throw new Error(errors.join('\n'));
     // Compose a cover around an unmodified UI capture using HTML/CSS.
     const cover = new BrowserWindow({ width: 1600, height: 1200, frame: false, show: false,
       webPreferences: { contextIsolation: true, nodeIntegration: false, backgroundThrottling: false } });
     cover.setContentSize(1600, 1200);
-    const listingImage = (await fs.readFile(path.join(output, 'listings.png'))).toString('base64');
+    const listingImage = (await fs.readFile(path.join(output, screenshotName('listings')))).toString('base64');
     await cover.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(`
-      <!doctype html><html lang="en"><meta charset="utf-8"><title>Merchant Mode</title>
+      <!doctype html><html lang="en"><meta charset="utf-8"><title>DAMerchant</title>
       <style>
         * { box-sizing: border-box; } body { margin: 0; min-height: 100vh; padding: 48px 140px; color: #ebe7dd;
           font-family: 'Segoe UI', sans-serif; background: radial-gradient(ellipse at 85% 0%, #343026 0%, #14151b 46%, #0a0b0f 100%); }
@@ -89,15 +112,15 @@ if (!process.versions.electron) {
       </style><body>
         <header><div><div class="eyebrow">DARK AGES / AISLINGEXCHANGE</div><h1>Set up shop. Step away.</h1>
           <p>Your listings. Your characters. One merchant desk.</p></div>
-          <div class="edition">MERCHANT MODE<br>Windows desktop companion</div></header>
-        <div class="frame"><div class="bar"><i class="dot"></i><i class="dot"></i><i class="dot"></i><span>Merchant Mode — Listings</span></div>
-          <img alt="Merchant Mode listings" src="data:image/png;base64,${listingImage}"></div>
+          <div class="edition">DAMERCHANT<br>Windows desktop companion</div></header>
+        <div class="frame"><div class="bar"><i class="dot"></i><i class="dot"></i><i class="dot"></i><span>DAMerchant — Listings</span></div>
+          <img alt="DAMerchant listings" src="data:image/png;base64,${listingImage}"></div>
         <footer><span>SELL · BUY · TRADE</span><span>ACTUAL APP CAPTURE · SAMPLE DATA</span></footer>
       </body></html>`));
     await cover.webContents.executeJavaScript('Promise.all([...document.images].map(image => image.decode()))');
     const overflow = await cover.webContents.executeJavaScript('document.documentElement.scrollHeight > innerHeight || document.documentElement.scrollWidth > innerWidth');
     if (overflow) throw new Error('Documentation cover overflows its canvas');
-    await fs.writeFile(path.join(output, 'cover.png'), (await cover.webContents.capturePage()).toPNG());
+    await fs.writeFile(path.join(output, screenshotName('cover')), (await cover.webContents.capturePage()).toPNG());
     console.log('Captured documentation cover: 1600 × 1200');
     cover.destroy();
     window.destroy();

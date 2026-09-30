@@ -489,3 +489,10 @@ body {
   border-color: var(--color-border-hover) !important;
   box-shadow: 0 2px 12px var(--color-gold-glow) !important;
 }
+/* Character sprite PNGs are full-body art. Portrait slots show the upper half. */
+.character-portrait {
+  background-size: auto 200%;
+  background-position: center top;
+  background-repeat: no-repeat;
+  image-rendering: pixelated;
+}

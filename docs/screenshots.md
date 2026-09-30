@@ -7,12 +7,12 @@ npm ci
 npm run screenshots
 ```
 
-The command builds the app and runs a separate, hidden Electron window. It uses `scripts/screenshots/preload.cjs` in place of the real IPC bridge, blocks network requests, and writes PNGs to `docs/images/`. It never starts the proxy, opens a game client, reads the user's app database, or signs in to AE.
+The command builds the app and runs a separate, hidden Electron window. It uses `scripts/screenshots/preload.cjs` in place of the real IPC bridge, blocks network requests, and writes versioned PNGs to `docs/images/` so README images refresh when a release changes. It never starts the proxy, opens a game client, reads the user's app database, or signs in to AE.
 
-- `dashboard.png`: inventory, gold, character tabs and matched whispers.
-- `listings.png`: sell, buy and trade listings with sync indicators.
-- `history.png`: completed trades with both sides of each exchange.
-- `cover.png`: a composed introduction using the unmodified listings capture.
+- `dashboard-v<version>.png`: inventory, gold, character tabs and matched whispers.
+- `listings-v<version>.png`: sell, buy and trade listings with sync indicators.
+- `history-v<version>.png`: completed trades with both sides of each exchange.
+- `cover-v<version>.png`: a composed introduction using the unmodified listings capture.
 
 Animations are disabled for capture, and external web fonts use the app's local fallback. The temporary Electron profile is ignored under `.screenshots-cache/`. Exact text rasterization can differ between operating systems; Windows is the reference platform.
 

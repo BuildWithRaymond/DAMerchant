@@ -1,6 +1,6 @@
 # Architecture
 
-Merchant Mode has three layers: a React renderer, an Electron host, and a TypeScript trading core.
+DAMerchant has three layers: a React renderer, an Electron host, and a TypeScript trading core.
 
 ```mermaid
 flowchart LR

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { MapPin, ShoppingBag, Tag, ArrowLeftRight, Users, User } from 'lucide-react';
-import { getSpriteDataUrl, getAvatarData, type AvatarData } from '../lib/ae-api';
+import { getSpriteDataUrl } from '../lib/ae-api';
 
 interface Props {
   merchants: GlobalMerchantData[];
@@ -60,7 +60,7 @@ export default function AllMerchantsView({ merchants, proxyStatus, onViewProfile
             No other merchants online
           </p>
           <p style={{ margin: 0, fontSize: 12, color: 'var(--color-text-tertiary)' }}>
-            Other MerchantMode users will appear here when they're online
+            Other DAMerchant users will appear here when they're online
           </p>
         </div>
       )}
@@ -78,7 +78,7 @@ export default function AllMerchantsView({ merchants, proxyStatus, onViewProfile
   );
 }
 
-function AvatarCircle({ spriteUrl, avatar }: { spriteUrl: string | null; avatar: AvatarData | null }) {
+function AvatarCircle({ spriteUrl }: { spriteUrl: string | null }) {
   if (!spriteUrl) {
     return (
       <div
@@ -95,21 +95,13 @@ function AvatarCircle({ spriteUrl, avatar }: { spriteUrl: string | null; avatar:
     );
   }
 
-  const offsetX = avatar?.offsetX ?? 50;
-  const offsetY = avatar?.offsetY ?? 20;
-  const zoom = avatar?.zoom ?? 220;
-
   return (
     <div
-      className="flex-shrink-0 rounded-full"
+      className="flex-shrink-0 rounded-full overflow-hidden character-portrait"
       style={{
         width: 36,
         height: 36,
         backgroundImage: `url(${spriteUrl})`,
-        backgroundSize: `${zoom}%`,
-        backgroundPosition: `${offsetX}% ${offsetY}%`,
-        backgroundRepeat: 'no-repeat',
-        imageRendering: 'pixelated',
         border: '1px solid rgba(201,168,76,0.3)',
       }}
     />
@@ -117,11 +109,9 @@ function AvatarCircle({ spriteUrl, avatar }: { spriteUrl: string | null; avatar:
 }
 
 function MerchantCard({ merchant, onViewProfile }: { merchant: GlobalMerchantData; onViewProfile?: (name: string) => void }) {
-  const [avatar, setAvatar] = useState<AvatarData | null>(null);
   const [spriteUrl, setSpriteUrl] = useState<string | null>(null);
 
   useEffect(() => {
-    getAvatarData(merchant.name).then(setAvatar);
     getSpriteDataUrl(merchant.name).then(setSpriteUrl);
   }, [merchant.name]);
 
@@ -133,7 +123,7 @@ function MerchantCard({ merchant, onViewProfile }: { merchant: GlobalMerchantDat
     <div className="stat-card" style={{ padding: '18px 20px' }}>
       {/* Header: avatar + name/location + sprite */}
       <div className="flex items-start gap-3 mb-3">
-        <AvatarCircle spriteUrl={spriteUrl} avatar={avatar} />
+        <AvatarCircle spriteUrl={spriteUrl} />
 
         <div className="flex-1 min-w-0">
           <h3
@@ -163,17 +153,10 @@ function MerchantCard({ merchant, onViewProfile }: { merchant: GlobalMerchantDat
         </div>
 
         {spriteUrl && (
-          <div className="flex-shrink-0 self-center">
-            <img
-              src={spriteUrl}
-              alt=""
-              style={{
-                height: 64,
-                imageRendering: 'pixelated',
-                opacity: 0.85,
-              }}
-            />
-          </div>
+          <div
+            className="flex-shrink-0 self-center rounded-lg character-portrait"
+            style={{ width: 64, height: 64, backgroundImage: `url(${spriteUrl})`, opacity: 0.85 }}
+          />
         )}
       </div>
 

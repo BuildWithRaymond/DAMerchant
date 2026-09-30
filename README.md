@@ -1,7 +1,7 @@
-# Merchant Mode
+# DAMerchant
 
 <p align="center">
-  <img src="build/icon256.png" width="80" alt="Merchant Mode gold coin icon" />
+  <img src="build/icon256.png" width="80" alt="DAMerchant gold coin icon" />
 </p>
 
 <p align="center"><strong>Your shop stays open. Your hands stay free.</strong><br />
@@ -20,9 +20,11 @@ Automated Dark Ages trading, connected to AislingExchange.</p>
   <a href="https://github.com/BuildWithRaymond/DAMerchant/issues">Report an issue</a>
 </p>
 
-![Merchant Mode: Set up shop. Step away. Actual listings screen with sample data.](docs/images/cover.png)
+![DAMerchant: Set up shop. Step away. Actual listings screen with sample data.](docs/images/cover-v1.1.9.png)
 
-Merchant Mode is a Windows desktop app for running a shop in **Dark Ages**. Create sell, buy or trade listings, respond to buyer whispers, and complete exchanges automatically. Manage multiple characters from one window and connect your listings to [AislingExchange](https://aislingexchange.com).
+> **Merchant Mode is now DAMerchant.** Same great trading system, new name. Recent updates make SELL exchanges safer, cancel unrelated offers promptly, keep completed sales in History and listing counts, add automatic group titles, improve character portraits, and support the current Dark Ages 7.41 client. Existing settings and trade data stay in place.
+
+DAMerchant is a Windows desktop app for running a shop in **Dark Ages**. Create sell, buy or trade listings, respond to buyer whispers, and complete exchanges automatically. Manage multiple characters from one window and connect your listings to [AislingExchange](https://aislingexchange.com).
 
 ## Built for the merchant workflow
 
@@ -32,6 +34,7 @@ Merchant Mode is a Windows desktop app for running a shop in **Dark Ages**. Crea
 - **Keep characters organized.** Separate inventory, listings and engine state for each connected character, with automatic reconnect support.
 - **Reach the wider market.** Browse online merchants and sync selected listings with your AislingExchange account.
 - **See what happened.** Review matched whispers and both sides of completed exchanges, then export transaction history to CSV.
+- **Show what you trade.** The in-game group title follows active sell, buy and trade listings automatically. Switch to a custom title and description on the Dashboard when you prefer your own message.
 
 ## Screenshots
 
@@ -40,17 +43,17 @@ Actual app screens with fictional sample data. [Capture them locally](docs/scree
 <details>
 <summary><strong>Dashboard — inventory, gold and matched whispers</strong></summary>
 
-![Merchant Mode dashboard showing character tabs, inventory, gold and matched buyer whispers](docs/images/dashboard.png)
+![DAMerchant dashboard showing character tabs, inventory, gold and matched buyer whispers](docs/images/dashboard-v1.1.9.png)
 
 </details>
 
 | Listings | Trade history |
 | --- | --- |
-| [![Sell, buy and trade listings with item sprites and marketplace sync status](docs/images/listings.png)](docs/images/listings.png) | [![Completed trades showing items and gold given and received](docs/images/history.png)](docs/images/history.png) |
+| [![Sell, buy and trade listings with item sprites and marketplace sync status](docs/images/listings-v1.1.9.png)](docs/images/listings-v1.1.9.png) | [![Completed trades showing items and gold given and received](docs/images/history-v1.1.9.png)](docs/images/history-v1.1.9.png) |
 
 ## Getting started
 
-1. Download the Windows installer from [GitHub Releases](https://github.com/BuildWithRaymond/DAMerchant/releases/latest) and install Merchant Mode.
+1. Download the Windows installer from [GitHub Releases](https://github.com/BuildWithRaymond/DAMerchant/releases/latest) and install DAMerchant.
 2. Open **Settings** and select your `Darkages.exe` if it is not in the default installation folder.
 3. Click **Launch Client**, then sign in to your game character. A character tab appears once connected.
 4. Open **Listings** to add a sell, buy or trade listing, or click an inventory item on the Dashboard.
@@ -62,11 +65,11 @@ To sync marketplace listings, sign in to AislingExchange in **Settings**. Use ea
 
 ### Existing bot or proxy setup
 
-Merchant Mode listens on `127.0.0.1:2615`. Point your existing client/proxy chain at that endpoint when using another launcher. The separate port avoids the commonly used `2610`–`2612` range.
+DAMerchant listens on `127.0.0.1:2615`. Point your existing client/proxy chain at that endpoint when using another launcher. The separate port avoids the commonly used `2610`–`2612` range.
 
 ### Local data
 
-Settings, listings, transaction history and AE authentication are stored in `merchantmode.db` under Electron's user data directory. They are separate from the source checkout. Back up the app's data before moving installations; keep that database and packet logs private.
+Settings, listings, transaction history and AE authentication remain in `merchantmode.db` under the existing `merchantmode` user data directory, including after the DAMerchant rename. They are separate from the source checkout. Back up the app's data before moving installations; keep that database and packet logs private.
 
 ## Development
 
@@ -117,4 +120,4 @@ Built with Electron, React, TypeScript, Vite, Tailwind CSS and SQLite.
 
 ## License and credits
 
-Project code is available under the [ISC license](LICENSE). Dark Ages artwork and third-party dependencies retain their respective owners' rights; see [third-party notices](docs/third-party-notices.md). Merchant Mode is a community project, not an official Dark Ages client.
+Project code is available under the [ISC license](LICENSE). Dark Ages artwork and third-party dependencies retain their respective owners' rights; see [third-party notices](docs/third-party-notices.md). DAMerchant is a community project, not an official Dark Ages client.

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Download, Receipt, ArrowLeftRight, ArrowRight, User, Coins } from 'lucide-react';
-import { getSpriteDataUrl, getAvatarData, type AvatarData } from '../lib/ae-api';
+import { getSpriteDataUrl } from '../lib/ae-api';
 
 interface Transaction {
   id: string;
@@ -43,7 +43,7 @@ export default function TransactionLog({ transactions, onViewProfile }: Props) {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `merchantmode-transactions-${new Date().toISOString().split('T')[0]}.csv`;
+    a.download = `damerchant-transactions-${new Date().toISOString().split('T')[0]}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   }
@@ -177,16 +177,14 @@ function TransactionCard({ tx, index, onViewProfile }: { tx: Transaction; index:
 
 function PlayerBadge({ name, onClick }: { name: string; onClick?: () => void }) {
   const [spriteUrl, setSpriteUrl] = useState<string | null>(null);
-  const [avatar, setAvatar] = useState<AvatarData | null>(null);
 
   useEffect(() => {
     getSpriteDataUrl(name).then(setSpriteUrl);
-    getAvatarData(name).then(setAvatar);
   }, [name]);
 
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-      <AvatarCircle spriteUrl={spriteUrl} avatar={avatar} size={28} />
+      <AvatarCircle spriteUrl={spriteUrl} size={28} />
       <span
         style={{
           fontSize: 13, fontWeight: 600,
@@ -201,7 +199,7 @@ function PlayerBadge({ name, onClick }: { name: string; onClick?: () => void }) 
   );
 }
 
-function AvatarCircle({ spriteUrl, avatar, size = 28 }: { spriteUrl: string | null; avatar: AvatarData | null; size?: number }) {
+function AvatarCircle({ spriteUrl, size = 28 }: { spriteUrl: string | null; size?: number }) {
   if (!spriteUrl) {
     return (
       <div
@@ -218,21 +216,13 @@ function AvatarCircle({ spriteUrl, avatar, size = 28 }: { spriteUrl: string | nu
     );
   }
 
-  const offsetX = avatar?.offsetX ?? 50;
-  const offsetY = avatar?.offsetY ?? 20;
-  const zoom = avatar?.zoom ?? 220;
-
   return (
     <div
-      className="flex-shrink-0 rounded-full"
+      className="flex-shrink-0 rounded-full overflow-hidden character-portrait"
       style={{
         width: size,
         height: size,
         backgroundImage: `url(${spriteUrl})`,
-        backgroundSize: `${zoom}%`,
-        backgroundPosition: `${offsetX}% ${offsetY}%`,
-        backgroundRepeat: 'no-repeat',
-        imageRendering: 'pixelated',
         border: '1px solid rgba(201,168,76,0.3)',
       }}
     />

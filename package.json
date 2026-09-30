@@ -1,7 +1,7 @@
 {
   "name": "merchantmode",
-  "version": "1.1.8",
-  "description": "Windows desktop companion for automated Dark Ages trading and AislingExchange listings",
+  "version": "1.1.9",
+  "description": "DAMerchant desktop companion for automated Dark Ages trading and AislingExchange listings",
   "main": "dist-electron/electron/main.js",
   "scripts": {
     "dev": "vite",
@@ -17,7 +17,7 @@
   },
   "build": {
     "appId": "com.merchantmode.app",
-    "productName": "Merchant Mode",
+    "productName": "DAMerchant",
     "directories": {
       "output": "release"
     },

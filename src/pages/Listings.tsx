@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Monitor, Tag, ShoppingBag, ArrowLeftRight, MapPin, List, Download, Globe } from 'lucide-react';
 import ListingManager from '../components/ListingManager';
 import type { PrefillItem } from '../components/ListingManager';
-import { getSpriteDataUrl, getAvatarData, type AvatarData } from '../lib/ae-api';
+import { getSpriteDataUrl } from '../lib/ae-api';
 import { User } from 'lucide-react';
 
 interface Props {
@@ -160,11 +160,9 @@ export default function Listings({ characterName, prefillItem, onPrefillConsumed
 
 function MerchantAvatar({ name }: { name: string }) {
   const [spriteUrl, setSpriteUrl] = useState<string | null>(null);
-  const [avatar, setAvatar] = useState<AvatarData | null>(null);
 
   useEffect(() => {
     getSpriteDataUrl(name).then(setSpriteUrl);
-    getAvatarData(name).then(setAvatar);
   }, [name]);
 
   if (!spriteUrl) {
@@ -185,15 +183,11 @@ function MerchantAvatar({ name }: { name: string }) {
 
   return (
     <div
-      className="flex-shrink-0 rounded-full"
+      className="flex-shrink-0 rounded-full overflow-hidden character-portrait"
       style={{
         width: 28,
         height: 28,
         backgroundImage: `url(${spriteUrl})`,
-        backgroundSize: `${avatar?.zoom ?? 220}%`,
-        backgroundPosition: `${avatar?.offsetX ?? 50}% ${avatar?.offsetY ?? 20}%`,
-        backgroundRepeat: 'no-repeat',
-        imageRendering: 'pixelated',
         border: '1px solid rgba(201,168,76,0.3)',
       }}
     />

@@ -207,7 +207,7 @@ export default function About() {
                 backgroundClip: 'text',
                 letterSpacing: '-0.02em',
               }}>
-                Merchant Mode
+                DAMerchant
               </h1>
               <p style={{
                 margin: '6px 0 0',
@@ -425,7 +425,7 @@ export default function About() {
               <h3 style={{ margin: 0, fontSize: 14, fontWeight: 600 }} className="gold-text">How It Works</h3>
             </div>
             <p style={{ margin: '0 0 10px', fontSize: 12, color: 'var(--color-text-secondary)', lineHeight: 1.7 }}>
-              Merchant Mode acts as a local proxy between your game client and the server, intercepting trade-related packets so you can set up buy and sell listings and walk away.
+              DAMerchant acts as a local proxy between your game client and the server, intercepting trade-related packets so you can set up buy and sell listings and walk away.
             </p>
             <p style={{ margin: 0, fontSize: 12, color: 'var(--color-text-secondary)', lineHeight: 1.7 }}>
               When another player whispers your character with a matching request, the tool automatically handles the exchange window, places the items or gold, and completes the trade on your behalf — supporting stackable items, price shorthand, and real-time inventory tracking.
@@ -464,7 +464,7 @@ export default function About() {
               A community-driven marketplace and resource hub for Dark Ages. Browse, list, and search items across the game's economy — bringing price discovery to a trade system built on whispers and word of mouth.
             </p>
             <p style={{ margin: '0 0 16px', fontSize: 12, color: 'var(--color-text-secondary)', lineHeight: 1.7, position: 'relative' }}>
-              Merchant Mode is designed to work hand-in-hand with the exchange, bridging the gap between online listings and in-game trades.
+              DAMerchant is designed to work hand-in-hand with the exchange, bridging the gap between online listings and in-game trades.
             </p>
             <a
               href="#"

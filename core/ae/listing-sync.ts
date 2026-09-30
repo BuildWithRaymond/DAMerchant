@@ -214,7 +214,7 @@ export class ListingSync {
         type: tx.type,
         price: tx.price || null,
         quantity: tx.quantity || 1,
-        notes: 'Auto-recorded from MerchantMode trade',
+        notes: 'Auto-recorded from DAMerchant trade',
       });
     } catch (err: any) {
       console.error('[ListingSync] Transaction sync error:', err.message);
