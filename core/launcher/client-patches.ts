@@ -4,10 +4,11 @@ export type MemoryReader = (address: number, length: number) => Buffer;
 export interface ClientPatchWrite { address: number; bytes: number[] }
 
 const MULTIPLE_INSTANCE = 0x57A7CE;
+const CURRENT_INSTANCE_JUMP = 0x57A7D9;
 const INTRO = 0x42E61F;
 
 const currentSites: ReadonlyArray<readonly [number, readonly number[]]> = [
-  // This layout already jumps past the single-instance error path.
+  // This layout may already have its single-instance error branch bypassed.
   [MULTIPLE_INSTANCE, [0xFF, 0x15, 0xC4, 0x91, 0x66, 0, 0x3D, 0xB7, 0, 0, 0, 0xEB, 0x07]],
   // The old intro patch cuts through different instructions in this layout.
   [INTRO, [0x3B, 0x91, 0x84, 0, 0, 0, 0x0F, 0x8C, 0xB1, 0, 0, 0]],
@@ -53,7 +54,16 @@ export function prepareClientPatches(read: MemoryReader, skipIntro: boolean): Cl
   const sites = profile === 'current-7.41'
     ? currentSites
     : skipIntro ? [...legacySites, legacyIntro] : legacySites;
-  for (const [address, expected] of sites) verifySite(read, address, expected);
+  for (const [address, expected] of sites) {
+    // Accept the original JNZ or an existing JMP, checking the entire instruction
+    // sequence and the same jump target before any process-memory writes.
+    const originalInstanceCheck = profile === 'current-7.41' && address === MULTIPLE_INSTANCE &&
+      read(CURRENT_INSTANCE_JUMP, 1)[0] === 0x75;
+    const verifiedBytes = originalInstanceCheck
+      ? expected.map((byte, index) => index === CURRENT_INSTANCE_JUMP - MULTIPLE_INSTANCE ? 0x75 : byte)
+      : expected;
+    verifySite(read, address, verifiedBytes);
+  }
   return profile;
 }
 
@@ -74,6 +84,7 @@ export function buildClientWrites(
 
   if (profile === 'current-7.41') {
     return [
+      { address: CURRENT_INSTANCE_JUMP, bytes: [0xEB] },
       { address: 0x433392, bytes: hostBytes },
       { address: 0x565628, bytes: hostBytes },
       { address: 0x4333C2, bytes: loopback },

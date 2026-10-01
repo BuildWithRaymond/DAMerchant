@@ -14,10 +14,14 @@ const currentSites = new Map<number, number[]>([
   [0x56565D, [0xB9, 0x32, 0x0A, 0, 0]],
 ]);
 
-function readFixture(address: number, length: number): Buffer {
+function readFixture(address: number, length: number, instanceJump = 0xEB): Buffer {
   for (const [base, bytes] of currentSites) {
     if (address >= base && address + length <= base + bytes.length) {
-      return Buffer.from(bytes.slice(address - base, address - base + length));
+      const result = Buffer.from(bytes.slice(address - base, address - base + length));
+      if (address <= 0x57A7D9 && address + length > 0x57A7D9) {
+        result[0x57A7D9 - address] = instanceJump;
+      }
+      return result;
     }
   }
   throw new Error(`Missing simulated memory at 0x${address.toString(16)}`);
@@ -36,7 +40,39 @@ test('current 7.41 client routes both host paths and all port branches to the pr
     assert.equal(at(address)?.[2], 0x0A);
   }
   assert.equal(writes.some((write) => write.address === 0x57A7CE), false);
+  assert.deepEqual(at(0x57A7D9), [0xEB]);
   assert.equal(writes.some((write) => write.address === 0x42E61F), false);
+});
+
+test('unmodified current 7.41 client launches with a single-instance bypass', () => {
+  for (const skipIntro of [true, false]) {
+    const profile = prepareClientPatches((address, length) => readFixture(address, length, 0x75), skipIntro);
+    assert.equal(profile, 'current-7.41');
+    const writes = buildClientWrites(profile, 0x12345678, 2615, skipIntro);
+    assert.deepEqual(writes.find(({ address }) => address === 0x57A7D9)?.bytes, [0xEB]);
+    assert.equal(writes.some(({ address }) => address === 0x57A7CE || address === 0x42E61F), false);
+  }
+});
+
+test('current 7.41 client rejects other single-instance jump instructions', () => {
+  for (const jump of [0x74, 0x90, 0xE9]) {
+    assert.throws(() => prepareClientPatches((address, length) => readFixture(address, length, jump), true),
+      /0x57a7d9/i);
+  }
+});
+
+test('both current-client jump variants still verify surrounding instructions and jump target', () => {
+  for (const jump of [0x75, 0xEB]) {
+    for (const changedAddress of [0x57A7D5, 0x57A7DA]) {
+      const corruptRead = (address: number, length: number) => {
+        const bytes = readFixture(address, length, jump);
+        if (address <= changedAddress && address + length > changedAddress) bytes[changedAddress - address] ^= 1;
+        return bytes;
+      };
+      assert.throws(() => prepareClientPatches(corruptRead, true),
+        new RegExp(`0x${changedAddress.toString(16)}`, 'i'));
+    }
+  }
 });
 
 test('changed current-client patch site rejects the launch before any writes', () => {

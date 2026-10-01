@@ -1,6 +1,6 @@
 {
   "name": "merchantmode",
-  "version": "1.1.9",
+  "version": "1.1.10",
   "description": "DAMerchant desktop companion for automated Dark Ages trading and AislingExchange listings",
   "main": "dist-electron/electron/main.js",
   "scripts": {

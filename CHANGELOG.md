@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.1.10
+
+### Bug Fixes
+- Fixed client launch for the unmodified newer Dark Ages 7.41 layout that reported `expected 0xeb, got 0x75` at `0x57a7d9`.
+- Accept both the original conditional jump and an existing single-instance bypass, then apply the bypass in process memory. All surrounding instructions, jump targets, and endpoint patch sites still require verified bytes.
+- Added regression coverage for both jump variants, unexpected opcodes, and altered surrounding instructions and jump targets. The newer client's intro code remains intact.
+
 ## v1.1.9
 
 ### New name and group titles
