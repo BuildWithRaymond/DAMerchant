@@ -2,6 +2,7 @@
 import koffi from 'koffi';
 import path from 'path';
 import { buildClientWrites, prepareClientPatches } from './client-patches';
+import { navigateLoginScreens } from './login-screen-automation';
 
 // ─── Win32 Type Definitions ───
 
@@ -55,6 +56,9 @@ const PostMessageW = user32.func('PostMessageW', 'int', ['void *', 'uint32', 'ui
 const WM_CHAR = 0x0102;
 const FindWindowW = user32.func('FindWindowW', 'void *', ['str16', 'str16']);
 const GetWindowThreadProcessId = user32.func('GetWindowThreadProcessId', 'uint32', ['void *', koffi.out(koffi.pointer('uint32'))]);
+const GetWindowTextW = user32.func('GetWindowTextW', 'int', ['void *', 'void *', 'int']);
+const EnumWindowsProc = koffi.proto('__stdcall', 'DAMerchantEnumWindowsProc', 'int', ['void *', 'intptr']);
+const EnumWindows = user32.func('EnumWindows', 'int', [koffi.pointer(EnumWindowsProc), 'intptr']);
 const SetForegroundWindow = user32.func('SetForegroundWindow', 'int', ['void *']);
 const ShowWindow = user32.func('ShowWindow', 'int', ['void *', 'int']);
 const GetClientRect = user32.func('GetClientRect', 'int', ['void *', koffi.out(koffi.pointer(RECT))]);
@@ -258,18 +262,28 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/** Find only a Dark Ages window owned by the exact launched process. */
+export function findDaWindow(processId: number): any {
+  let found: any = null;
+  EnumWindows((hwnd: any) => {
+    const owner = [0];
+    GetWindowThreadProcessId(hwnd, owner);
+    if (owner[0] !== processId) return 1;
+    const title = Buffer.alloc(512);
+    const length = GetWindowTextW(hwnd, title, 256);
+    if (title.subarray(0, length * 2).toString('utf16le').toLowerCase() !== 'darkages') return 1;
+    found = hwnd;
+    return 0;
+  }, 0);
+  return found;
+}
+
 /** Find the DA client window and bring it to the foreground */
 function focusDaWindow(processId: number): boolean {
-  const hwnd = FindWindowW(null as any, 'Darkages');
+  const hwnd = findDaWindow(processId);
   if (!hwnd) {
     console.log('[AutoLogin] FindWindow: no "Darkages" window found');
     return false;
-  }
-  // Verify PID if possible
-  const pid = [0];
-  GetWindowThreadProcessId(hwnd, pid);
-  if (pid[0] !== processId) {
-    console.log(`[AutoLogin] Window PID ${pid[0]} != expected ${processId}, using it anyway`);
   }
   ShowWindow(hwnd, SW_RESTORE);
   SetForegroundWindow(hwnd);
@@ -299,22 +313,23 @@ function clickClientRelative(hwnd: any, clientX: number, clientY: number): void 
 }
 
 /** Click the OK button on the DA Notification screen and then Continue */
-export async function clickThroughLoginScreens(processId: number): Promise<void> {
-  // Wait for notification screen
-  await sleep(6000);
-  const hwnd = FindWindowW(null as any, 'Darkages');
-  if (!hwnd) { console.log('[AutoLogin] No DA window found'); return; }
-  focusDaWindow(processId);
-  await sleep(200);
-  // Click OK on notification
-  clickClientRelative(hwnd, 440, 775);
-  console.log('[AutoLogin] Clicked OK on Notification');
-  // Wait for main menu, click Continue
-  await sleep(3000);
-  clickClientRelative(hwnd, 155, 620);
-  await sleep(500);
-  clickClientRelative(hwnd, 155, 620);
-  console.log('[AutoLogin] Clicked Continue');
+export async function clickThroughLoginScreens(processId: number, signal?: AbortSignal, loginReady?: () => boolean): Promise<void> {
+  await navigateLoginScreens(processId, {
+    findWindow: findDaWindow,
+    isOwned: (hwnd: any, pid: number) => {
+      const owner = [0];
+      GetWindowThreadProcessId(hwnd, owner);
+      return owner[0] === pid;
+    },
+    focus: (hwnd: any) => { ShowWindow(hwnd, SW_RESTORE); SetForegroundWindow(hwnd); },
+    click: clickClientRelative,
+    wait: (milliseconds: number, abort?: AbortSignal) => new Promise((resolve, reject) => {
+      if (abort?.aborted) { reject(abort.reason); return; }
+      const timer = setTimeout(() => { abort?.removeEventListener('abort', cancel); resolve(); }, milliseconds);
+      const cancel = () => { clearTimeout(timer); reject(abort?.reason); };
+      abort?.addEventListener('abort', cancel, { once: true });
+    }),
+  }, signal, loginReady);
 }
 
 /** Send Enter key to the DA client (for submitting dialogs) */

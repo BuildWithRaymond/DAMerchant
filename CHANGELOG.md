@@ -1,5 +1,16 @@
 # Changelog
 
+## v1.1.12
+
+### Bug Fixes
+- Fixed the reconnect queue stopping after the first character reconnects or is canceled. Failed characters now retry in turn instead of blocking the remaining characters.
+- Detect the server's `Chaos is rising` announcement and wait five minutes before recovery, following Excalibur-safe's reset cooldown. Repeated announcements from the same reset do not extend the wait.
+- Bound login attempts to 90 seconds and remote TCP connects to 10 seconds. Failed attempts close their owned DA process and pending transports, including failures before a character context exists.
+- Target login clicks by exact process ID, wait for the window and login controls, and cancel stale screen navigation and credential callbacks. The newer client's intro sequence can finish before login navigation succeeds.
+- Capture credentials from automatic login packets so another server reset can recover the same character. Server socket errors now correctly trigger reconnect.
+- Show queued characters separately and restore reconnect countdowns when the banner mounts.
+- Added simulated reconnect, packet, cancellation, ownership, and screen-readiness coverage. No live game reset or trade is used in testing.
+
 ## v1.1.11
 
 ### Bug Fixes

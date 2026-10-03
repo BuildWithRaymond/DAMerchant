@@ -51,24 +51,55 @@ export class ProxyConnection extends EventEmitter {
     this.clientSocket = clientSocket;
     this.clientSocket.setNoDelay(true);
     this.localPort = localPort;
+    // The local client can exit while the remote TCP connect is still pending.
+    clientSocket.on('close', () => {
+      this.disconnectReason = 'client';
+      this.emit('clientDisconnected');
+      this.dispose();
+    });
+    clientSocket.on('error', () => {
+      this.disconnectReason = 'client';
+      this.dispose();
+    });
   }
 
   async connectToRemote(host: string, port: number): Promise<void> {
     return new Promise((resolve, reject) => {
-      const serverSocket = net.createConnection({ host, port }, () => {
-        serverSocket.setNoDelay(true);
-        this.serverSocket = serverSocket;
-        console.log(`[Proxy] Connected to ${host}:${port}`);
-        resolve();
+      if (this.disposed) { reject(new Error('Connection disposed')); return; }
+      const serverSocket = net.createConnection({ host, port });
+      this.serverSocket = serverSocket; // retain the pending socket so dispose can close it
+      let connected = false;
+      let settled = false;
+      const finish = (error?: Error) => {
+        if (settled) return;
+        settled = true;
+        if (error) reject(error); else resolve();
+      };
+      this.once('disposed', () => finish(new Error('Connection disposed')));
+      serverSocket.setTimeout(10_000);
+      serverSocket.once('timeout', () => {
+        this.disconnectReason = 'server';
+        finish(new Error('Remote connection timed out'));
+        this.dispose();
       });
-
+      serverSocket.once('connect', () => {
+        if (this.disposed) { finish(new Error('Connection disposed')); return; }
+        connected = true;
+        serverSocket.setTimeout(0);
+        serverSocket.setNoDelay(true);
+        console.log(`[Proxy] Connected to ${host}:${port}`);
+        finish();
+      });
       serverSocket.on('error', (err) => {
-        if (!this.serverSocket) {
-          reject(err);
-        } else {
-          console.error('[Proxy] Server error:', err.message);
-          this.dispose();
-        }
+        this.disconnectReason = 'server';
+        finish(err);
+        this.dispose();
+      });
+      serverSocket.once('close', () => {
+        if (connected || this.disposed) return;
+        this.disconnectReason = 'server';
+        finish(new Error('Remote connection closed before connect'));
+        this.dispose();
       });
     });
   }
@@ -91,18 +122,6 @@ export class ProxyConnection extends EventEmitter {
       this.processServerPackets();
     });
 
-    clientSocket.on('close', () => {
-      console.log('[Proxy] Client disconnected');
-      this.disconnectReason = 'client';
-      this.emit('clientDisconnected');
-      this.dispose();
-    });
-
-    clientSocket.on('error', (err) => {
-      console.error('[Proxy] Client error:', err.message);
-      this.dispose();
-    });
-
     serverSocket.on('close', () => {
       console.log('[Proxy] Server disconnected');
       this.disconnectReason = 'server';
@@ -116,6 +135,7 @@ export class ProxyConnection extends EventEmitter {
     serverSocket.on('error', (err) => {
       if (!this.disposed) {
         console.error('[Proxy] Server error:', err.message);
+        this.disconnectReason = 'server';
         this.dispose();
       }
     });
@@ -141,6 +161,10 @@ export class ProxyConnection extends EventEmitter {
   /** Inject a packet as if the client sent it. Used by merchant engine. */
   injectClientPacket(opCode: number, payload: Uint8Array): void {
     if (!this.serverSocket?.writable || this.disposed) return;
+
+    // Automatic logins must retain credentials across the same redirect path
+    // as manual logins, so recovery still works on a subsequent server reset.
+    if (opCode === ClientOpCode.Login) this.handleLoginCapture(payload);
 
     let data: Uint8Array;
     if (this.clientEncryptor.shouldEncrypt(opCode)) {

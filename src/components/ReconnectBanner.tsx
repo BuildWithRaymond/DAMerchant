@@ -20,6 +20,9 @@ export default function ReconnectBanner() {
 
     // Load initial state
     api.reconnect.getState().then((state) => {
+      for (const entry of state) {
+        if (entry.state === 'waiting' && entry.delay > 0) countdownRefs.current.set(entry.characterName, Date.now() + entry.delay);
+      }
       if (state.length > 0) setEntries(state);
     });
 
@@ -92,6 +95,9 @@ export default function ReconnectBanner() {
             />
 
             <span style={{ color: 'var(--color-text-primary)', flex: 1 }}>
+              {entry.state === 'queued' && (
+                <>Queued to reconnect <strong>{entry.characterName}</strong>...</>
+              )}
               {entry.state === 'waiting' && (
                 <>Reconnecting <strong>{entry.characterName}</strong> — attempt {entry.attempt} in {secondsLeft}s...</>
               )}

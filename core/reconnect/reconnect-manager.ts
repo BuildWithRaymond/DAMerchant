@@ -1,228 +1,259 @@
 import { EventEmitter } from 'events';
+import { ConnectionPhase } from '../proxy/connection-state';
+import { ServerOpCode } from '../network/packets/op-codes';
+import { BinaryReader } from '../network/serialization/binary-reader';
 
 export interface ReconnectEntry {
   characterName: string;
   username: string;
   password: string;
   attempt: number;
-  state: 'waiting' | 'launching' | 'connected' | 'cancelled';
-  /** Timestamp when the next attempt will fire */
+  state: 'queued' | 'waiting' | 'launching' | 'connected' | 'cancelled';
   nextAttemptAt: number;
 }
-
 export interface ReconnectStatusEvent {
   characterName: string;
   attempt: number;
-  state: 'waiting' | 'launching' | 'connected' | 'cancelled' | 'failed';
+  state: ReconnectEntry['state'] | 'failed';
   delay: number;
 }
+export interface ReconnectAttempt {
+  characterName: string;
+  attempt: number;
+  signal: AbortSignal;
+  processId?: number;
+}
+interface LoginConnection {
+  connectionState: { phase: ConnectionPhase; username: string };
+  once(event: 'disposed', listener: () => void): unknown;
+  dispose(): void;
+}
+type LaunchFn = (username: string, password: string, attempt: ReconnectAttempt) => Promise<{
+  success: boolean; processId?: number; error?: string;
+}>;
+interface ActiveAttempt {
+  entry: ReconnectEntry;
+  context: ReconnectAttempt;
+  controller: AbortController;
+  timer?: ReturnType<typeof setTimeout>;
+  connections: Set<LoginConnection>;
+  connected: boolean;
+}
+const BACKOFF_DELAYS = [5_000, 15_000, 30_000];
+const ATTEMPT_TIMEOUT = 90_000;
+const CHAOS_RESET_WAIT = 300_000;
 
-type LaunchFn = (username: string, password: string) => Promise<{ success: boolean; processId?: number; error?: string }>;
-
-const BACKOFF_DELAYS = [5_000, 15_000, 30_000, 30_000];
-
-/**
- * Manages automatic reconnection after server disconnects.
- * Queues characters and processes them sequentially with backoff.
- */
+/** One owner for each launch/login, with bounded attempts and fair retries. */
 export class ReconnectManager extends EventEmitter {
   private entries = new Map<string, ReconnectEntry>();
-  private timers = new Map<string, ReturnType<typeof setTimeout>>();
-  private launchFn: LaunchFn;
-
-  /** Characters queued for sequential processing */
   private queue: string[] = [];
-  private processing = false;
+  private active: ActiveAttempt | null = null;
+  private queueTimer?: ReturnType<typeof setTimeout>;
+  private resetNotBefore = 0;
+  private stopping = false;
+  private loginConnections = new WeakSet<LoginConnection>();
 
-  constructor(launchFn: LaunchFn) {
+  constructor(private launchFn: LaunchFn, private closeProcess: (processId: number) => void = () => {}) {
     super();
-    this.launchFn = launchFn;
   }
 
   scheduleReconnect(characterName: string, username: string, password: string): void {
-    // Don't duplicate
     if (this.entries.has(characterName)) return;
-
-    const entry: ReconnectEntry = {
-      characterName,
-      username,
-      password,
-      attempt: 0,
-      state: 'waiting',
-      nextAttemptAt: 0,
-    };
-    this.entries.set(characterName, entry);
+    this.entries.set(characterName, { characterName, username, password, attempt: 0, state: 'queued', nextAttemptAt: 0 });
     this.queue.push(characterName);
-
-    console.log(`[Reconnect] Queued ${characterName} for reconnection`);
-    this.emitStatus(characterName, 'waiting', 0);
+    this.emitStatus(characterName, 'queued');
     this.processQueue();
+  }
+
+  /** Repeated broadcasts from the same reset must not prolong its cooldown. */
+  notifyServerReset(): void {
+    if (this.resetNotBefore > Date.now()) return;
+    this.resetNotBefore = Date.now() + CHAOS_RESET_WAIT;
+    console.log('[Reconnect] Chaos reset detected; waiting five minutes before login');
+    if (this.active?.entry.state === 'launching') this.scheduleRetry(this.active.entry.characterName);
+    else if (this.active) this.waitForLaunch(this.active);
+  }
+
+  observeServerPacket(opCode: number, data: Uint8Array): boolean {
+    if (opCode !== ServerOpCode.ServerMessage) return false;
+    try {
+      const reader = new BinaryReader(data);
+      reader.readUint8(); // world-message display type
+      if (!reader.readString16().startsWith('Chaos is rising')) return false;
+      this.notifyServerReset();
+      return true;
+    } catch { return false; }
   }
 
   cancelReconnect(characterName: string): void {
     const entry = this.entries.get(characterName);
     if (!entry) return;
-
     entry.state = 'cancelled';
-    const timer = this.timers.get(characterName);
-    if (timer) {
-      clearTimeout(timer);
-      this.timers.delete(characterName);
-    }
+    this.emitStatus(characterName, 'cancelled');
     this.entries.delete(characterName);
-    this.queue = this.queue.filter((n) => n !== characterName);
-
-    console.log(`[Reconnect] Cancelled reconnect for ${characterName}`);
-    this.emitStatus(characterName, 'cancelled', 0);
+    this.queue = this.queue.filter(name => name !== characterName);
+    if (this.active?.entry === entry) this.releaseAttempt(true);
+    this.processQueue();
   }
 
   cancelAll(): void {
-    for (const name of [...this.entries.keys()]) {
-      this.cancelReconnect(name);
-    }
-    this.processing = false;
+    this.stopping = true;
+    if (this.queueTimer) clearTimeout(this.queueTimer);
+    this.queueTimer = undefined;
+    for (const name of [...this.entries.keys()]) this.cancelReconnect(name);
+    this.queue = [];
+    this.stopping = false;
   }
 
   onCharacterConnected(characterName: string): void {
     const entry = this.entries.get(characterName);
     if (!entry) return;
-
     entry.state = 'connected';
-    const timer = this.timers.get(characterName);
-    if (timer) {
-      clearTimeout(timer);
-      this.timers.delete(characterName);
-    }
+    this.emitStatus(characterName, 'connected');
     this.entries.delete(characterName);
-
-    console.log(`[Reconnect] ${characterName} reconnected successfully`);
-    this.emitStatus(characterName, 'connected', 0);
-
-    // Process next in queue after a short gap
-    setTimeout(() => this.processQueue(), 5000);
+    this.queue = this.queue.filter(name => name !== characterName);
+    if (this.active?.entry === entry) {
+      this.active.connected = true;
+      this.releaseAttempt(false);
+      // Avoid overlapping the final login packets with the next client launch.
+      this.queueTimer = setTimeout(() => { this.queueTimer = undefined; this.processQueue(); }, 5000);
+      this.queueTimer.unref?.();
+    }
   }
 
   isReconnecting(characterName?: string): boolean {
-    if (characterName) return this.entries.has(characterName);
-    return this.entries.size > 0;
+    return characterName ? this.entries.has(characterName) : this.entries.size > 0;
   }
 
-  /** Get credentials for the character currently being reconnected */
   getReconnectingCredentials(characterName: string): { username: string; password: string } | null {
     const entry = this.entries.get(characterName);
-    if (!entry) return null;
-    return { username: entry.username, password: entry.password };
+    return entry ? { username: entry.username, password: entry.password } : null;
   }
 
-  /** Get the character name currently in 'launching' state (for matching new connections) */
-  getCurrentlyLaunching(): string | null {
-    for (const [name, entry] of this.entries) {
-      if (entry.state === 'launching') return name;
-    }
-    return null;
+  getCurrentlyLaunching(): string | null { return this.getCurrentAttempt()?.characterName ?? null; }
+
+  getCurrentAttempt(): ReconnectAttempt | null {
+    return this.active?.entry.state === 'launching' ? this.active.context : null;
   }
 
   getState(): ReconnectStatusEvent[] {
-    const result: ReconnectStatusEvent[] = [];
-    for (const entry of this.entries.values()) {
-      result.push({
-        characterName: entry.characterName,
-        attempt: entry.attempt,
-        state: entry.state,
-        delay: Math.max(0, entry.nextAttemptAt - Date.now()),
-      });
-    }
-    return result;
+    return [...this.entries.values()].map(entry => ({
+      characterName: entry.characterName, attempt: entry.attempt, state: entry.state,
+      delay: entry.state === 'waiting' ? Math.max(0, entry.nextAttemptAt - Date.now()) : 0,
+    }));
   }
 
-  private async processQueue(): Promise<void> {
-    if (this.processing) return;
-    if (this.queue.length === 0) return;
-
-    this.processing = true;
-    const characterName = this.queue.shift()!;
-    const entry = this.entries.get(characterName);
-
-    if (!entry || entry.state === 'cancelled') {
-      this.processing = false;
-      this.processQueue();
-      return;
-    }
-
-    await this.attemptReconnect(characterName);
+  /** Bind delayed login to this attempt and transport, rather than a global timer. */
+  loginWhenReady(connection: LoginConnection, screensReady: Promise<unknown>, sendLogin: (username: string, password: string) => void): void {
+    const active = this.active;
+    if (!active || active.entry.state !== 'launching' || this.loginConnections.has(connection)) return;
+    const capturedUser = connection.connectionState.username;
+    if (capturedUser && capturedUser.toLowerCase() !== active.entry.username.toLowerCase()) return;
+    this.loginConnections.add(connection);
+    active.connections.add(connection);
+    connection.once('disposed', () => {
+      active.connections.delete(connection);
+      if (this.isCurrent(active) && connection.connectionState.phase !== ConnectionPhase.REDIRECTING)
+        this.scheduleRetry(active.entry.characterName);
+    });
+    screensReady.then(() => {
+      if (!this.isCurrent(active) || active.controller.signal.aborted || !active.connections.has(connection) ||
+          connection.connectionState.phase === ConnectionPhase.IN_GAME || connection.connectionState.phase === ConnectionPhase.REDIRECTING) return;
+      sendLogin(active.entry.username, active.entry.password);
+    }).catch(() => { if (this.isCurrent(active)) this.scheduleRetry(active.entry.characterName); });
   }
 
-  private async attemptReconnect(characterName: string): Promise<void> {
-    const entry = this.entries.get(characterName);
-    if (!entry || entry.state === 'cancelled') {
-      this.processing = false;
-      this.processQueue();
+  scheduleRetry(characterName: string): void {
+    const active = this.active;
+    if (!active || active.entry.characterName !== characterName || active.entry.state !== 'launching') return;
+    this.emitStatus(characterName, 'failed');
+    active.entry.state = 'queued';
+    this.releaseAttempt(true);
+    this.queue.push(characterName);
+    this.emitStatus(characterName, 'queued');
+    this.processQueue();
+  }
+
+  private processQueue(): void {
+    if (this.stopping || this.active || this.queueTimer) return;
+    while (this.queue.length) {
+      const entry = this.entries.get(this.queue.shift()!);
+      if (!entry || entry.state !== 'queued') continue;
+      entry.attempt++;
+      entry.nextAttemptAt = Date.now() + BACKOFF_DELAYS[Math.min(entry.attempt - 1, BACKOFF_DELAYS.length - 1)];
+      const controller = new AbortController();
+      this.active = { entry, controller, connections: new Set(), connected: false,
+        context: { characterName: entry.characterName, attempt: entry.attempt, signal: controller.signal } };
+      this.waitForLaunch(this.active);
       return;
     }
+  }
 
-    entry.attempt++;
-    const delay = BACKOFF_DELAYS[Math.min(entry.attempt - 1, BACKOFF_DELAYS.length - 1)];
-    entry.state = 'waiting';
-    entry.nextAttemptAt = Date.now() + delay;
+  private waitForLaunch(active: ActiveAttempt): void {
+    if (active.timer) clearTimeout(active.timer);
+    active.entry.state = 'waiting';
+    active.entry.nextAttemptAt = Math.max(active.entry.nextAttemptAt, this.resetNotBefore);
+    const delay = Math.max(0, active.entry.nextAttemptAt - Date.now());
+    this.emitStatus(active.entry.characterName, 'waiting', delay);
+    active.timer = setTimeout(() => void this.launch(active), delay);
+    active.timer.unref?.();
+  }
 
-    console.log(`[Reconnect] ${characterName} attempt ${entry.attempt} in ${delay / 1000}s`);
-    this.emitStatus(characterName, 'waiting', delay);
-
-    this.timers.set(characterName, setTimeout(async () => {
-      this.timers.delete(characterName);
-
-      // Check if still active
-      const current = this.entries.get(characterName);
-      if (!current || current.state === 'cancelled') {
-        this.processing = false;
-        this.processQueue();
+  private async launch(active: ActiveAttempt): Promise<void> {
+    if (!this.isCurrent(active)) return;
+    active.entry.state = 'launching';
+    this.emitStatus(active.entry.characterName, 'launching');
+    // CreateProcess can succeed even when login fails before any character context exists.
+    active.timer = setTimeout(() => {
+      if (this.isCurrent(active)) {
+        console.warn('[Reconnect] Login timed out for ' + active.entry.characterName);
+        this.scheduleRetry(active.entry.characterName);
+      }
+    }, ATTEMPT_TIMEOUT);
+    active.timer.unref?.();
+    try {
+      const result = await this.launchFn(active.entry.username, active.entry.password, active.context);
+      if (!this.isCurrent(active)) {
+        if (result.processId !== undefined && !active.connected) this.closeOwnedProcess(result.processId);
         return;
       }
-
-      current.state = 'launching';
-      this.emitStatus(characterName, 'launching', 0);
-
-      try {
-        const result = await this.launchFn(current.username, current.password);
-        if (!result.success) {
-          console.log(`[Reconnect] Launch failed for ${characterName}: ${result.error}`);
-          this.emitStatus(characterName, 'failed', 0);
-          // Retry — the server may still be down, connectToRemote will fail,
-          // and the disconnection handler will NOT re-queue (we're still in entries).
-          // So we schedule the next attempt ourselves.
-          await this.attemptReconnect(characterName);
-        }
-        // If launch succeeded, we wait for either:
-        // 1. onCharacterConnected() — success, processes next in queue
-        // 2. The proxy connection fails (server still down) — the disconnect handler
-        //    in main.ts will call scheduleRetry() which re-queues this character
-      } catch (err: any) {
-        console.error(`[Reconnect] Launch error for ${characterName}:`, err.message);
-        this.emitStatus(characterName, 'failed', 0);
-        await this.attemptReconnect(characterName);
+      active.context.processId = result.processId;
+      if (!result.success) {
+        console.warn('[Reconnect] Launch failed for ' + active.entry.characterName + ': ' + (result.error ?? 'unknown error'));
+        this.scheduleRetry(active.entry.characterName);
       }
-    }, delay));
+    } catch (error) {
+      if (this.isCurrent(active)) {
+        console.warn('[Reconnect] Launch failed for ' + active.entry.characterName + ': ' + (error instanceof Error ? error.message : 'unknown error'));
+        this.scheduleRetry(active.entry.characterName);
+      }
+    }
   }
 
-  /**
-   * Called when a reconnecting character's connection fails (server still down).
-   * Re-queues the character for another attempt without resetting the entry.
-   */
-  scheduleRetry(characterName: string): void {
-    const entry = this.entries.get(characterName);
-    if (!entry || entry.state === 'cancelled') return;
-
-    this.processing = false;
-    this.attemptReconnect(characterName);
+  private isCurrent(active: ActiveAttempt): boolean {
+    return this.active === active && this.entries.get(active.entry.characterName) === active.entry;
   }
 
-  private emitStatus(characterName: string, state: ReconnectStatusEvent['state'], delay: number): void {
-    const entry = this.entries.get(characterName);
-    this.emit('status', {
-      characterName,
-      attempt: entry?.attempt ?? 0,
-      state,
-      delay,
-    } satisfies ReconnectStatusEvent);
+  private releaseAttempt(close: boolean): void {
+    const active = this.active;
+    if (!active) return;
+    this.active = null;
+    if (active.timer) clearTimeout(active.timer);
+    active.controller.abort();
+    if (close) {
+      for (const connection of active.connections) {
+        try { connection.dispose(); } catch { /* continue closing the owned process */ }
+      }
+      if (active.context.processId !== undefined) this.closeOwnedProcess(active.context.processId);
+    }
+  }
+
+  private closeOwnedProcess(processId: number): void {
+    try { this.closeProcess(processId); }
+    catch (error) { console.error('[Reconnect] Failed to close owned client PID ' + processId + ':', error); }
+  }
+
+  private emitStatus(characterName: string, state: ReconnectStatusEvent['state'], delay = 0): void {
+    this.emit('status', { characterName, attempt: this.entries.get(characterName)?.attempt ?? 0, state, delay } satisfies ReconnectStatusEvent);
   }
 }

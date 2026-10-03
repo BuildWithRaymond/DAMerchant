@@ -35,19 +35,30 @@ const merchantHub = new MerchantHubClient();
 const launchedClients: Map<number, LaunchedClient> = new Map();
 const PROXY_PORT = 2615; // Local proxy port — avoids 2610-2612 which bots commonly bind
 import { injectLogin } from '../core/reconnect/login-injector';
+const reconnectScreens = new Map<number, { ready: Promise<void>; loginReady: boolean }>();
 
 // Auto-reconnect manager — re-launches DA clients after server restarts
-const reconnectManager = new ReconnectManager(async (_username, _password) => {
+const reconnectManager = new ReconnectManager(async (_username, _password, attempt) => {
   const clientPath = db.getSetting('client_path', 'C:\\Program Files (x86)\\KRU\\Dark Ages\\Darkages.exe');
   if (!proxyServer?.isListening()) startProxy();
   const client = launchClient(clientPath, { localPort: PROXY_PORT, skipIntro: true });
   launchedClients.set(client.processId, client);
-  // Click through Notification OK and Continue via mouse (background, non-blocking)
-  // Login itself is handled via packet injection when LoginControls arrives
-  clickThroughLoginScreens(client.processId).catch((err) => {
-    console.error('[Reconnect] Click-through error:', err);
+  attempt.processId = client.processId;
+  const screens = { ready: Promise.resolve(), loginReady: false };
+  screens.ready = clickThroughLoginScreens(client.processId, attempt.signal, () => screens.loginReady);
+  reconnectScreens.set(client.processId, screens);
+  screens.ready.catch(() => {
+    if (!attempt.signal.aborted && reconnectManager.getCurrentAttempt() === attempt) {
+      reconnectManager.scheduleRetry(attempt.characterName);
+    }
   });
   return { success: true, processId: client.processId };
+}, (processId) => {
+  const client = launchedClients.get(processId);
+  reconnectScreens.delete(processId);
+  if (!client) return;
+  launchedClients.delete(processId);
+  terminateClient(client);
 });
 
 // AE integration modules
@@ -460,6 +471,10 @@ function startProxy() {
   proxyServer.on('packet', (direction: string, opCode: number, data: Uint8Array, connection: ProxyConnection) => {
     const charName = connection.connectionState.characterName;
 
+    if (direction === 'server' && opCode === ServerOpCode.ServerMessage && db.getSetting('auto_reconnect_enabled', 'true') === 'true') {
+      reconnectManager.observeServerPacket(opCode, data);
+    }
+
     // Log for sniffer
     const entry = {
       direction,
@@ -475,21 +490,14 @@ function startProxy() {
     // on the GAME SERVER connection (after redirect, not the initial login server).
     // The Notification OK and Continue clicks are handled via mouse automation.
     const isPostRedirect = connection.connectionState.characterName !== '';
-    if (direction === 'server' && opCode === ServerOpCode.LoginControls && reconnectManager.isReconnecting() && isPostRedirect) {
-      if (!(connection as any)._reconnectSentLogin) {
-        (connection as any)._reconnectSentLogin = true;
-        const launchingChar = reconnectManager.getCurrentlyLaunching();
-        if (launchingChar) {
-          const creds = reconnectManager.getReconnectingCredentials(launchingChar);
-          if (creds) {
-            // Delay login injection until after mouse automation clicks through
-            // Notification OK (~6s) and Continue (~3s) = ~10s after launch
-            setTimeout(() => {
-              console.log(`[Reconnect] Injecting login for ${launchingChar} (user=${creds.username})`);
-              injectLogin(connection, creds.username, creds.password);
-            }, 12000);
-          }
-        }
+    if (direction === 'server' && opCode === ServerOpCode.LoginControls && isPostRedirect) {
+      const attempt = reconnectManager.getCurrentAttempt();
+      const screens = attempt?.processId !== undefined ? reconnectScreens.get(attempt.processId) : undefined;
+      if (screens) {
+        screens.loginReady = true;
+        reconnectManager.loginWhenReady(connection, screens.ready, (username, password) => {
+          injectLogin(connection, username, password);
+        });
       }
     }
 
@@ -501,6 +509,8 @@ function startProxy() {
 
       // Clear reconnect state if this character was being reconnected
       if (reconnectManager.isReconnecting(charName)) {
+        const attempt = reconnectManager.getCurrentAttempt();
+        if (attempt?.characterName === charName && attempt.processId !== undefined) reconnectScreens.delete(attempt.processId);
         reconnectManager.onCharacterConnected(charName);
       }
 
