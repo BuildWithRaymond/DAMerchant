@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.1.11
+
+### Bug Fixes
+- Fixed multi-item SELL exchanges canceling when the server displays a stack count in the item name, such as `Borim(2)` or `Borim(4)`.
+- Accept the count suffix only for a stackable item with the exact reserved quantity. Item identity, sprite, gold offer, and buyer acceptance checks still apply.
+- Added simulated packet coverage for buying two Borims at 500k each, four-item sales, sell-as-stack pricing, History and listing counts, and rejection of incorrect counts or items.
+
 ## v1.1.10
 
 ### Bug Fixes

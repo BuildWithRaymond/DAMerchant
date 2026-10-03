@@ -70,6 +70,105 @@ function stickFixture() {
   return { engine, sale, inventory };
 }
 
+function borimFixture(stackSize?: number) {
+  const inventory = new InventoryTracker();
+  inventory.getState().items.set(1, {
+    slot: 1, sprite: 0x8000 | 1504, color: 0, name: 'Borim', quantity: 99,
+    isStackable: true, maxDurability: 0, durability: 0,
+  });
+  const engine = new MerchantEngine(inventory);
+  const sale = { ...listing(), itemName: 'Borim', price: 500_000,
+    quantity: 99, quantityRemaining: 99, stackSize };
+  engine.setListings([sale]);
+  engine.processServerPacket(ServerOpCode.Exchange, exchange(ExchangeServerEvent.Started, w => {
+    w.writeUint32(99); w.writeString8('Buyer');
+  }));
+  return { engine, inventory, sale };
+}
+
+test('per-unit Borim sales accept server stack counts and record the full multi-item sale', () => {
+  for (const quantity of [2, 4]) {
+    const { engine, inventory, sale } = borimFixture();
+    const fills: SellReservation[] = [];
+    const stack: number[][] = [];
+    let cancelled = 0;
+    let accepts = 0;
+    engine.on('requestFillSell', r => fills.push(r));
+    engine.on('requestFillSellStack', (...args: number[]) => stack.push(args));
+    engine.on('requestCancel', () => cancelled++);
+    engine.on('requestAccept', () => accepts++);
+
+    gold(engine, 500_000 * quantity);
+    assert.equal(fills.length, 1);
+    assert.equal(fills[0].quantity, quantity);
+    engine.processServerPacket(ServerOpCode.Exchange, exchange(ExchangeServerEvent.QuantityPrompt, w => w.writeUint8(1)));
+    assert.deepEqual(stack, [[99, 1, quantity]]);
+    accepted(engine, ExchangeParty.Them);
+    assert.equal(accepts, 0);
+    itemEcho(engine, `Borim(${quantity})`, 34272, 1);
+    assert.equal(cancelled, 0);
+    assert.equal(accepts, 0, 'placement invalidates the early buyer acceptance');
+    accepted(engine, ExchangeParty.Them);
+    assert.equal(accepts, 1);
+    accepted(engine, ExchangeParty.You);
+
+    inventory.getItem(1)!.quantity = 99 - quantity;
+    inventory.emit('itemAdded');
+    assert.equal(engine.getTransactions().length, 0);
+    inventory.getState().gold = 500_000 * quantity;
+    inventory.emit('goldUpdated');
+    inventory.emit('goldUpdated');
+    assert.equal(engine.getTransactions().length, 1);
+    assert.deepEqual(engine.getTransactions()[0].itemsGiven, [{ name: 'Borim', quantity }]);
+    assert.equal(engine.getTransactions()[0].goldReceived, 500_000 * quantity);
+    assert.equal(sale.quantityRemaining, 99 - quantity);
+  }
+});
+
+test('sell-as-stack pricing accepts the exact reserved server stack count', () => {
+  const { engine } = borimFixture(2);
+  let cancelled = 0;
+  let accepts = 0;
+  engine.on('requestCancel', () => cancelled++);
+  engine.on('requestAccept', () => accepts++);
+  gold(engine, 1_000_000); // two stacks of two, priced at 500k per stack
+  itemEcho(engine, 'Borim(4)', 34272, 1);
+  assert.equal(cancelled, 0);
+  accepted(engine, ExchangeParty.Them);
+  assert.equal(accepts, 1);
+});
+
+test('wrong or malformed stack counts and different item names cannot confirm a sale', () => {
+  for (const name of ['Borim(1)', 'Borim(4)', 'Borim(0)', 'Borim(-2)', 'Borim(2.0)',
+    'Borim(02)', 'Borim(2) extra', 'Borim of Power(2)']) {
+    const { engine } = borimFixture();
+    let cancelled = 0;
+    let accepts = 0;
+    engine.on('requestCancel', () => cancelled++);
+    engine.on('requestAccept', () => accepts++);
+    gold(engine, 1_000_000);
+    itemEcho(engine, name, 34272, 1);
+    accepted(engine, ExchangeParty.Them);
+    assert.equal(cancelled, 1, name);
+    assert.equal(accepts, 0, name);
+  }
+});
+
+test('stack count cannot disguise a wrong sprite or a nonstackable sale item', () => {
+  for (const stackable of [true, false]) {
+    const { engine, inventory } = borimFixture();
+    if (!stackable) {
+      inventory.getItem(1)!.isStackable = false;
+      inventory.getItem(1)!.quantity = 1;
+    }
+    let cancelled = 0;
+    engine.on('requestCancel', () => cancelled++);
+    gold(engine, 500_000);
+    itemEcho(engine, 'Borim(1)', stackable ? 1505 : 34272, 1);
+    assert.equal(cancelled, 1);
+  }
+});
+
 test('gold reserves and places the item before buyer Accept, only once', () => {
   const { engine } = fixture();
   const fills: SellReservation[] = [];

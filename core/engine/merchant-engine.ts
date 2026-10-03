@@ -50,10 +50,13 @@ export interface SellReservation {
   acceptSent: boolean;
 }
 
-function matchesSaleEchoName(expectedName: string, echoedName: string): boolean {
+function matchesSaleEchoName(expectedName: string, echoedName: string, stackQuantity?: number): boolean {
   const expected = expectedName.toLowerCase();
   const echoed = echoedName.toLowerCase();
   if (echoed === expected) return true;
+  // Stackable exchange items display their offered count, e.g. "Borim(2)".
+  // Only the exact reserved count may confirm a SELL stack.
+  if (stackQuantity !== undefined && echoed === `${expected}(${stackQuantity})`) return true;
   if (!echoed.startsWith(`${expected} `)) return false;
 
   // The server appends durability to some item names in the exchange window.
@@ -442,7 +445,7 @@ export class MerchantEngine extends EventEmitter {
         }
         // Inventory and exchange packets may carry different item/creature flag bits.
         // The low 14 bits are the actual item sprite in both packet types.
-        if (!matchesSaleEchoName(sell.listing.itemName, name) ||
+        if (!matchesSaleEchoName(sell.listing.itemName, name, expected.stackable ? expected.quantity : undefined) ||
             (sprite & 0x3FFF) !== (expected.sprite & 0x3FFF)) {
           this.cancelUnsafeOffer(
             `Server echoed an unexpected sale item: expected "${sell.listing.itemName}" ` +
